@@ -68,7 +68,15 @@ impl From<mupdf::Error> for OpenError {
 
 /// Open a PDF, authenticating when needed.
 pub fn open_pdf(path: &Path, password: Option<&str>) -> Result<PdfDocument, OpenError> {
-    let mut doc = Document::open(path).map_err(|e| OpenError::Failed(e.to_string()))?;
+    // MuPDF takes raw bytes on Unix (any file name works) and UTF-8 on Windows.
+    #[cfg(unix)]
+    let opened = Document::open(path);
+    #[cfg(not(unix))]
+    let opened = Document::open(
+        path.to_str()
+            .ok_or_else(|| OpenError::Failed("the file name is not valid UTF-8".into()))?,
+    );
+    let mut doc = opened.map_err(|e| OpenError::Failed(e.to_string()))?;
     if !doc.is_pdf() {
         return Err(OpenError::Failed("not a PDF document".into()));
     }

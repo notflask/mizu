@@ -12,7 +12,7 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoopProxy};
 use winit::keyboard::ModifiersState;
 use winit::window::{CursorIcon, Window, WindowId};
 
-use crate::config::{self, Settings};
+use crate::config::Settings;
 use crate::input::keys::parse_seq;
 use crate::input::Key;
 use crate::platform::{self, PlatformEvent};
@@ -383,8 +383,8 @@ impl ApplicationHandler<UserEvent> for App {
         {
             use winit::platform::wayland::WindowAttributesExtWayland;
             use winit::platform::x11::WindowAttributesExtX11;
-            attrs = WindowAttributesExtWayland::with_name(attrs, config::APP_ID, "mizu");
-            attrs = WindowAttributesExtX11::with_name(attrs, "mizu", config::APP_ID);
+            attrs = WindowAttributesExtWayland::with_name(attrs, crate::config::APP_ID, "mizu");
+            attrs = WindowAttributesExtX11::with_name(attrs, "mizu", crate::config::APP_ID);
         }
         if let Some(icon) = crate::icon::window_icon() {
             attrs = attrs.with_window_icon(Some(icon));
