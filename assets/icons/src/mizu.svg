@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="bg" x1="0.15" y1="0" x2="0.85" y2="1">
+      <stop offset="0" stop-color="#4F9BFF"/><stop offset="0.55" stop-color="#2F66EA"/><stop offset="1" stop-color="#1B36B8"/>
+    </linearGradient>
+    <linearGradient id="gloss" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.26"/><stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+    <clipPath id="clip"><path d="M280,72 L744,72 Q944,72 944,272 L944,736 Q944,936 744,936 L280,936 Q80,936 80,736 L80,272 Q80,72 280,72 Z"/></clipPath>
+    <filter id="blur" x="-20%" y="-20%" width="140%" height="150%"><feGaussianBlur stdDeviation="22"/></filter>
+    <filter id="blob" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="90"/></filter>
+  </defs>
+  <path d="M280,72 L744,72 Q944,72 944,272 L944,736 Q944,936 744,936 L280,936 Q80,936 80,736 L80,272 Q80,72 280,72 Z" transform="translate(0,18)" fill="#0A1A55" opacity="0.38" filter="url(#blur)"/>
+  <path d="M280,72 L744,72 Q944,72 944,272 L944,736 Q944,936 744,936 L280,936 Q80,936 80,736 L80,272 Q80,72 280,72 Z" fill="url(#bg)"/>
+  <g clip-path="url(#clip)"><circle cx="250" cy="820" r="360" fill="#35C8F2" opacity="0.20" filter="url(#blob)"/><circle cx="840" cy="200" r="300" fill="#7C6CFF" opacity="0.12" filter="url(#blob)"/></g>
+  <g clip-path="url(#clip)"><rect x="0" y="0" width="1024" height="560" fill="url(#gloss)"/></g>
+  <g transform="translate(222.0,228.0) scale(5.8000)">
+    <defs>
+      <mask id="shape" maskUnits="userSpaceOnUse" x="-20" y="-20" width="140" height="140"><path d="M50 6 L50 82 Q50 92 37 87" fill="none" stroke="#fff" stroke-width="12.5" stroke-linecap="round" stroke-linejoin="round" /><path d="M11 37 L37 35 Q31 60 12 77" fill="none" stroke="#fff" stroke-width="12.5" stroke-linecap="round" stroke-linejoin="round" /><path d="M67 21 Q61 49 40 68" fill="none" stroke="#fff" stroke-width="12.5" stroke-linecap="round" stroke-linejoin="round" /><path d="M55 44 Q69 62 89 82" fill="none" stroke="#fff" stroke-width="12.5" stroke-linecap="round" stroke-linejoin="round" /></mask>
+      <mask id="ring" maskUnits="userSpaceOnUse" x="-20" y="-20" width="140" height="140"><path d="M50 6 L50 82 Q50 92 37 87" fill="none" stroke="#fff" stroke-width="13.9" stroke-linecap="round" stroke-linejoin="round" /><path d="M11 37 L37 35 Q31 60 12 77" fill="none" stroke="#fff" stroke-width="13.9" stroke-linecap="round" stroke-linejoin="round" /><path d="M67 21 Q61 49 40 68" fill="none" stroke="#fff" stroke-width="13.9" stroke-linecap="round" stroke-linejoin="round" /><path d="M55 44 Q69 62 89 82" fill="none" stroke="#fff" stroke-width="13.9" stroke-linecap="round" stroke-linejoin="round" /><path d="M50 6 L50 82 Q50 92 37 87" fill="none" stroke="#000" stroke-width="10.6" stroke-linecap="round" stroke-linejoin="round" /><path d="M11 37 L37 35 Q31 60 12 77" fill="none" stroke="#000" stroke-width="10.6" stroke-linecap="round" stroke-linejoin="round" /><path d="M67 21 Q61 49 40 68" fill="none" stroke="#000" stroke-width="10.6" stroke-linecap="round" stroke-linejoin="round" /><path d="M55 44 Q69 62 89 82" fill="none" stroke="#000" stroke-width="10.6" stroke-linecap="round" stroke-linejoin="round" /></mask>
+      <mask id="inner" maskUnits="userSpaceOnUse" x="-20" y="-20" width="140" height="140"><path d="M50 6 L50 82 Q50 92 37 87" fill="none" stroke="#fff" stroke-width="10.5" stroke-linecap="round" stroke-linejoin="round" /><path d="M11 37 L37 35 Q31 60 12 77" fill="none" stroke="#fff" stroke-width="10.5" stroke-linecap="round" stroke-linejoin="round" /><path d="M67 21 Q61 49 40 68" fill="none" stroke="#fff" stroke-width="10.5" stroke-linecap="round" stroke-linejoin="round" /><path d="M55 44 Q69 62 89 82" fill="none" stroke="#fff" stroke-width="10.5" stroke-linecap="round" stroke-linejoin="round" /></mask>
+      <linearGradient id="body" gradientUnits="userSpaceOnUse" x1="10" y1="0" x2="90" y2="100">
+        <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.78"/>
+        <stop offset="0.55" stop-color="#E4EFFF" stop-opacity="0.46"/>
+        <stop offset="1" stop-color="#B9D4FF" stop-opacity="0.34"/>
+      </linearGradient>
+      <linearGradient id="rim" gradientUnits="userSpaceOnUse" x1="5" y1="0" x2="95" y2="100">
+        <stop offset="0" stop-color="#FFFFFF" stop-opacity="1"/>
+        <stop offset="0.45" stop-color="#FFFFFF" stop-opacity="0.55"/>
+        <stop offset="1" stop-color="#D7E7FF" stop-opacity="0.85"/>
+      </linearGradient>
+      <linearGradient id="deep" gradientUnits="userSpaceOnUse" x1="0" y1="30" x2="0" y2="95">
+        <stop offset="0" stop-color="#0B2AA8" stop-opacity="0"/>
+        <stop offset="1" stop-color="#0A1F85" stop-opacity="0.20"/>
+      </linearGradient>
+      <linearGradient id="caustic" gradientUnits="userSpaceOnUse" x1="0" y1="100" x2="100" y2="0">
+        <stop offset="0" stop-color="#9FF6FF" stop-opacity="0.45"/>
+        <stop offset="0.6" stop-color="#7FF0FF" stop-opacity="0"/>
+      </linearGradient>
+      <filter id="soft" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="2.4"/></filter>
+      <filter id="spec" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="0.7"/></filter>
+    </defs>
+    <!-- depth: soft shadow under the glass -->
+    <g transform="translate(0,3.2)" filter="url(#soft)" opacity="0.55"><path d="M50 6 L50 82 Q50 92 37 87" fill="none" stroke="#06165E" stroke-width="13.5" stroke-linecap="round" stroke-linejoin="round" /><path d="M11 37 L37 35 Q31 60 12 77" fill="none" stroke="#06165E" stroke-width="13.5" stroke-linecap="round" stroke-linejoin="round" /><path d="M67 21 Q61 49 40 68" fill="none" stroke="#06165E" stroke-width="13.5" stroke-linecap="round" stroke-linejoin="round" /><path d="M55 44 Q69 62 89 82" fill="none" stroke="#06165E" stroke-width="13.5" stroke-linecap="round" stroke-linejoin="round" /></g>
+    <!-- glass body -->
+    <rect x="-20" y="-20" width="140" height="140" fill="url(#body)" mask="url(#shape)"/>
+    <rect x="-20" y="-20" width="140" height="140" fill="url(#caustic)" mask="url(#inner)"/>
+    <rect x="-20" y="-20" width="140" height="140" fill="url(#deep)" mask="url(#shape)"/>
+    <!-- bright rim, strongest at the top left -->
+    <rect x="-20" y="-20" width="140" height="140" fill="url(#rim)" mask="url(#ring)"/>
+    <!-- specular streaks -->
+    <g mask="url(#inner)" filter="url(#spec)" opacity="0.95">
+      <g transform="translate(-1.8,-2.2)"><path d="M50 6 L50 82 Q50 92 37 87" fill="none" stroke="#FFFFFF" stroke-width="3.5000000000000004" stroke-linecap="round" stroke-linejoin="round" /><path d="M11 37 L37 35 Q31 60 12 77" fill="none" stroke="#FFFFFF" stroke-width="3.5000000000000004" stroke-linecap="round" stroke-linejoin="round" /><path d="M67 21 Q61 49 40 68" fill="none" stroke="#FFFFFF" stroke-width="3.5000000000000004" stroke-linecap="round" stroke-linejoin="round" /><path d="M55 44 Q69 62 89 82" fill="none" stroke="#FFFFFF" stroke-width="3.5000000000000004" stroke-linecap="round" stroke-linejoin="round" /></g>
+    </g>
+  </g>
+</svg>
