@@ -1,0 +1,96 @@
+[package]
+name = "mizu"
+version = "0.1.0"
+edition = "2021"
+description = "A minimal, fast PDF viewer with Vim keybindings, a dark mode for the page itself, and ink annotations"
+license = "AGPL-3.0-or-later"
+repository = "https://github.com/notflask/mizu"
+readme = "README.md"
+build = "build.rs"
+
+[workspace]
+members = [".", "xtask"]
+
+[features]
+default = []
+# Tracy-based profiling. Costs nothing when disabled.
+profile = ["profiling/profile-with-tracy"]
+
+[dependencies]
+mupdf = { version = "0.8.0", default-features = false, features = ["system-fonts", "base14-fonts"] }
+winit = { version = "0.30.13", default-features = false, features = ["rwh_06", "x11", "wayland", "wayland-dlopen", "wayland-csd-adwaita"] }
+wgpu = { version = "30", default-features = false, features = ["wgsl", "vulkan", "gles", "metal", "dx12", "std", "parking_lot"] }
+glyphon = "0.12.0"
+lyon_tessellation = "1.0.22"
+bytemuck = { version = "1.25", features = ["derive"] }
+crossbeam-channel = "0.5"
+notify = { version = "8.2", default-features = false, features = ["macos_fsevent"] }
+notify-debouncer-mini = { version = "0.7", default-features = false }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = { version = "1.0", default-features = false, features = ["parse", "serde"] }
+directories = "6"
+lexopt = "0.3"
+anyhow = "1"
+thiserror = "2"
+log = "0.4"
+env_logger = { version = "0.11", default-features = false, features = ["humantime"] }
+open = "5"
+uuid = { version = "1", features = ["v4"] }
+tempfile = "3"
+pollster = "1"
+raw-window-handle = "0.6"
+profiling = "1"
+
+[target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
+wayland-client = "0.31"
+wayland-protocols = { version = "0.32", features = ["client", "unstable"] }
+x11rb = { version = "0.13", features = ["xinput", "allow-unsafe-code"] }
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_Input_Pointer",
+    "Win32_UI_Shell",
+    "Win32_Graphics_Gdi",
+] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", features = ["NSEvent", "NSResponder", "NSApplication"] }
+objc2-foundation = "0.3"
+block2 = "0.6"
+
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1"
+
+[dev-dependencies]
+criterion = { version = "0.7", default-features = false }
+
+[[bench]]
+name = "mizu"
+harness = false
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true
+debug = false
+
+[profile.profiling]
+inherits = "release"
+debug = true
+strip = false
+
+# Quick optimised builds for development: `cargo build --profile fast`.
+[profile.fast]
+inherits = "release"
+lto = "off"
+codegen-units = 16
+incremental = true
+panic = "unwind"
+strip = false
+debug = 1
