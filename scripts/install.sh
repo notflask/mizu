@@ -253,7 +253,9 @@ linux_refresh_caches() {
 	if have update-desktop-database; then
 		srun update-desktop-database -q "$share/applications" 2>/dev/null || true
 	fi
-	if have gtk-update-icon-cache && [ -d "$share/icons/hicolor" ]; then
+	# Only refresh an icon cache that exists; creating one in ~/.local is
+	# not needed and would outlive --uninstall.
+	if have gtk-update-icon-cache && [ -f "$share/icons/hicolor/icon-theme.cache" ]; then
 		srun gtk-update-icon-cache -q -f -t "$share/icons/hicolor" 2>/dev/null || true
 	fi
 	if have xdg-desktop-menu; then
