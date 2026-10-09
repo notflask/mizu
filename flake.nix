@@ -1,7 +1,10 @@
 {
   description = "mizu — a minimal, fast PDF viewer with Vim keys, a dark mode for the page itself, and ink";
 
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+  # A pinned nixos-unstable release tarball. Pinning it here (instead of the
+  # github: form) lets `nix run github:notflask/mizu` work with the committed
+  # flake.lock; update with `nix flake update`.
+  inputs.nixpkgs.url = "https://releases.nixos.org/nixos/unstable/nixos-26.11pre1087755.e7439b6b14ad/nixexprs.tar.xz";
 
   outputs = { self, nixpkgs }:
     let
