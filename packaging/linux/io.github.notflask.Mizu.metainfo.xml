@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.notflask.Mizu</id>
+  <name>mizu</name>
+  <summary>A minimal PDF viewer with Vim keys, a dark mode for the page, and ink</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>AGPL-3.0-or-later</project_license>
+  <description>
+    <p>
+      mizu scrolls and zooms without stutter, turns the page itself dark, is driven from the
+      keyboard with Vim keys, and lets you write on the PDF with a pen. The ink is saved into the
+      PDF as ordinary annotations.
+    </p>
+  </description>
+  <launchable type="desktop-id">io.github.notflask.Mizu.desktop</launchable>
+  <url type="homepage">https://github.com/notflask/mizu</url>
+  <provides>
+    <binary>mizu</binary>
+  </provides>
+  <content_rating type="oars-1.1"/>
+</component>

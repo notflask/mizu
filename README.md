@@ -30,7 +30,29 @@ It is also a good excuse to learn how far you can push a GPU-composited document
 
 ## Install
 
-### Nix / NixOS
+### The install script (Linux and macOS)
+
+```sh
+git clone https://github.com/notflask/mizu && cd mizu
+./scripts/install.sh
+```
+
+It builds mizu from the checkout and installs it for your user:
+
+- **NixOS / Nix**: into your Nix profile (`nix profile install`), with the wrapper that finds the
+  Wayland, Vulkan and xkb libraries, the desktop entry and the icons.
+- **Other Linux distributions**: `~/.local/bin/mizu`, the desktop entry and the icons under
+  `~/.local/share`. Missing build dependencies are listed with the install command for your
+  distribution (apt, dnf, pacman, zypper).
+- **macOS**: `~/Applications/mizu.app` (registered with Launch Services, so "Open With" knows it)
+  and a `mizu` command in `~/.local/bin`.
+
+Running it again upgrades in place. Useful options: `--system` (all users: `/usr/local`,
+`/Applications`), `--prefix DIR`, `--universal` (macOS, arm64 + x86_64), `--default-pdf` (make
+mizu the default PDF/EPUB app; never done without asking), `--dry-run`, and `--uninstall`, which
+removes exactly the files it installed.
+
+### Nix / NixOS, declaratively
 
 ```sh
 nix run github:notflask/mizu -- some.pdf
@@ -47,7 +69,7 @@ environment.systemPackages = [ pkgs.mizu ];
 The flake wraps the binary so that the Wayland, Vulkan and xkb libraries are found at run time.
 `nix develop` gives you a shell with everything needed to build it.
 
-### From source
+### By hand
 
 You need a recent stable Rust and `clang` (MuPDF is compiled from the sources that ship with the
 `mupdf` crate, and its bindings are generated with bindgen).
@@ -62,7 +84,7 @@ driver have to be present at run time.
 
 ### Prebuilt binaries
 
-Tagged releases carry a Linux tarball, a Windows zip and a macOS app bundle.
+Tagged releases carry a Linux tarball, an AppImage, a Windows zip and a macOS app bundle.
 (Windows and macOS builds are produced by CI; I have mostly tested on Linux.)
 
 ## Using it
@@ -204,10 +226,9 @@ auto-reload when the file changes on disk, password-protected PDFs, and session 
 
 Things to know:
 
-- Pen **pressure** and **eraser end** are used where the windowing layer provides them. Windows and
-  macOS pens arrive through winit's touch events with force. On Wayland the tablet and pinch
-  protocols are not wired up yet, so a pen currently behaves like a mouse there and touchpad pinch
-  falls back to `Ctrl` + scroll.
+- Pen **pressure** and the **eraser end** work on Wayland (`tablet-v2`, together with touchpad pinch
+  through `pointer-gestures`). On Windows, pens arrive through winit's touch events with force.
+  Compositors without these protocols fall back to mouse behaviour and `Ctrl` + scroll.
 - There is no text selection or copying. That is deliberate for now: it is a reader with a pen.
 - I develop and test on Linux. The Windows and macOS builds compile in CI but have seen much less
   real use.
