@@ -228,7 +228,7 @@ down (all are environment variables):
 | Variable | Effect |
 | --- | --- |
 | `WGPU_BACKEND=vulkan` / `gl` | pick the graphics API |
-| `WGPU_POWER_PREF=high` | prefer the discrete GPU |
+| `WGPU_POWER_PREF=low` / `high` | pick the integrated / discrete GPU (default on Linux: high, so it matches a compositor running on the discrete GPU) |
 | `MIZU_PRESENT_MODE=fifo` / `mailbox` / `immediate` | swap-chain present mode |
 | `MIZU_SURFACE_FORMAT=bgra` / `rgba` | channel order of the swap chain |
 | `MIZU_NO_PLATFORM_INPUT=1` | do not start the Wayland pen/pinch backend |

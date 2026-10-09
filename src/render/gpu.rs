@@ -42,9 +42,17 @@ impl Gpu {
             .create_surface(window.clone())
             .context("cannot create a surface for the window")?;
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            // A reader does not need the discrete GPU; WGPU_POWER_PREF=high overrides.
-            power_preference:
-                wgpu::PowerPreference::from_env().unwrap_or(wgpu::PowerPreference::LowPower),
+            // WGPU_POWER_PREF=low|high overrides. A reader does not need the discrete GPU,
+            // but on Linux hybrid laptops the compositor often runs on the discrete one
+            // (e.g. Hyprland with AQ_DRM_DEVICES) and shows buffers from the integrated
+            // GPU as black, so prefer the GPU the compositor most likely uses there.
+            power_preference: wgpu::PowerPreference::from_env().unwrap_or(
+                if cfg!(target_os = "linux") {
+                    wgpu::PowerPreference::HighPerformance
+                } else {
+                    wgpu::PowerPreference::LowPower
+                },
+            ),
             force_fallback_adapter: false,
             compatible_surface: Some(&surface),
             apply_limit_buckets: false,
