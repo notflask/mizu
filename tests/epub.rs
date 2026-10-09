@@ -79,9 +79,9 @@ fn outline_search_and_links() {
 
     let opened = doc::open_document(&path, None, Reflow::default()).unwrap();
     // The paragraph is repeated 12 times, with "zebra" and "Zebra" in it.
-    let hits = search_page(opened.doc(), last_chapter, "zebra", false);
+    let hits = search_page(opened.doc().unwrap(), last_chapter, "zebra", false);
     assert_eq!(hits.len(), 24);
-    let hits = search_page(opened.doc(), last_chapter, "Zebra", true);
+    let hits = search_page(opened.doc().unwrap(), last_chapter, "Zebra", true);
     assert_eq!(hits.len(), 12);
 
     let svc = doc::service::Service::spawn_reflow(path, None, Reflow::default(), Arc::new(|| {}));
@@ -194,4 +194,87 @@ fn viewer_is_read_only_and_relays_out() {
     // :wq quits without trying to write.
     keys(&mut v, ":wq<CR>");
     assert!(v.quit);
+}
+
+fn comic(dir: &std::path::Path, rtl: bool) -> std::path::PathBuf {
+    let path = dir.join("comic.epub");
+    // Cover, six pages, one double page in the middle.
+    let mut sizes = vec![(300, 450); 8];
+    sizes[4] = (600, 450);
+    std::fs::write(&path, mizu::testutil::make_fxl_epub(&sizes, rtl)).unwrap();
+    path
+}
+
+#[test]
+fn fixed_layout_pages_come_from_their_images() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = comic(dir.path(), true);
+    let info = doc::load(&path, None, Reflow::default()).unwrap();
+    let book = info.book.as_ref().unwrap();
+    assert!(book.fixed && book.rtl);
+    assert_eq!(book.title.as_deref(), Some("Comic & Co"));
+    assert_eq!(info.pages.len(), 8);
+    assert_eq!((info.pages[0].w, info.pages[0].h), (300.0, 450.0));
+    assert_eq!(info.pages[4].w, 600.0);
+    assert_eq!(book.sides[4], doc::SpreadSide::Center);
+    let toc: Vec<(&str, Option<usize>)> = info
+        .outline
+        .iter()
+        .map(|o| (o.title.as_str(), o.page))
+        .collect();
+    assert_eq!(toc, vec![("Chapter 1", Some(0)), ("Chapter 2", Some(2))]);
+
+    // The tile is the page's image, not reflowed text.
+    let pool = Pool::spawn_reflow(path, None, Reflow::default(), Arc::new(|| {}), 1);
+    let key = TileKey {
+        page: 1,
+        scale: 1.0f32.to_bits(),
+        tx: 0,
+        ty: 0,
+    };
+    pool.set_wanted(vec![key], vec![]);
+    match pool.rx.recv_timeout(Duration::from_secs(20)).unwrap() {
+        Rendered::Tile(t) => {
+            assert_eq!((t.w, t.h), (300, 450));
+            let px = &t.data[(100 * 512 + 100) * 4..][..3];
+            assert_eq!(px, &[60, 60, 60], "the grey of page 2");
+        }
+        Rendered::Failed { error, .. } | Rendered::OpenFailed(error) => panic!("{error}"),
+        Rendered::Thumb(_) => panic!("unexpected thumb"),
+    }
+}
+
+#[test]
+fn manga_spreads_read_right_to_left() {
+    isolate();
+    let dir = tempfile::tempdir().unwrap();
+    let mut v = Viewer::new(Settings::default(), None, Arc::new(|| {}));
+    // A wide window: the book's "landscape" spreads are on.
+    v.set_window([1400, 800], 1.0);
+    v.open(comic(dir.path(), true), LoadPurpose::Open { page: None });
+    pump(&mut v, "comic", |v| v.doc.is_some());
+    assert!(v.spreads_active());
+    let d = v.doc.as_ref().unwrap();
+    let p = &d.layout.pages;
+    // Cover alone, then pairs with the first page on the right.
+    assert!(p[1].x > p[2].x && p[1].y == p[2].y);
+    // The double page stands alone.
+    assert!(p[4].y > p[3].y && p[4].y < p[5].y);
+    // Read-only, no text to search.
+    keys(&mut v, "i");
+    assert_eq!(v.mode, UiMode::Normal);
+
+    // J J: two rows on (cover -> 2|3 -> 4|5... here 4 is page index 3).
+    keys(&mut v, "JJ");
+    pump(&mut v, "pages", |v| !v.tick(Instant::now()).animating);
+    assert_eq!(v.current_page(), 3);
+
+    // Direction and spreads can be changed.
+    keys(&mut v, ":direction ltr<CR>");
+    let p = &v.doc.as_ref().unwrap().layout.pages;
+    assert!(p[1].x < p[2].x);
+    keys(&mut v, ":spread off<CR>");
+    assert!(!v.spreads_active());
+    let p = &v.doc.as_ref().unwrap().layout.pages;
+    assert!(p[2].y > p[1].y);
 }

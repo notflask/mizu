@@ -160,7 +160,11 @@ fn run(
                     send(Reply::SearchDone { id });
                     continue;
                 }
-                let d = doc.as_ref().expect("document opened above").doc();
+                // Image books have no text to search.
+                let Some(d) = doc.as_ref().and_then(|d| d.doc()) else {
+                    send(Reply::SearchDone { id });
+                    continue;
+                };
                 let n = d.page_count().unwrap_or(0).max(0) as usize;
                 for step in 0..n {
                     if current_search.load(Ordering::SeqCst) != id {
@@ -187,7 +191,9 @@ fn run(
                 if !ensure(&mut doc) {
                     continue;
                 }
-                let d = doc.as_ref().expect("document opened above").doc();
+                let Some(d) = doc.as_ref().and_then(|d| d.doc()) else {
+                    continue;
+                };
                 for p in pages {
                     let links = page_links(d, p);
                     send(Reply::Links { page: p, links });

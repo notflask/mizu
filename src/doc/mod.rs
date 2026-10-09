@@ -10,8 +10,12 @@ use mupdf::{DestinationKind, Document};
 use crate::ink::Stroke;
 
 pub mod annots;
+pub mod fxl;
 pub mod service;
 pub mod worker;
+pub mod zip;
+
+pub use fxl::{SpreadPref, SpreadSide};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PageMeta {
@@ -31,7 +35,7 @@ impl PageMeta {
     };
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct OutlineItem {
     pub title: String,
     pub page: Option<usize>,
@@ -59,24 +63,46 @@ impl Default for Reflow {
     }
 }
 
-/// An open document: a PDF (editable, with ink) or a laid-out reflowable
-/// one (read-only).
+/// An open document: a PDF (editable, with ink), a reflowable book laid
+/// out by MuPDF, or a fixed-layout book of page images (comics, manga).
+/// The last two are read-only.
 pub enum OpenDoc {
     Pdf(PdfDocument),
     Reflow(Document),
+    Fixed(FixedDoc),
+}
+
+pub struct FixedDoc {
+    pub zip: zip::Zip,
+    pub book: fxl::FixedBook,
 }
 
 impl OpenDoc {
-    pub fn doc(&self) -> &Document {
+    /// The MuPDF document, for everything but image books.
+    pub fn doc(&self) -> Option<&Document> {
         match self {
-            OpenDoc::Pdf(d) => d,
-            OpenDoc::Reflow(d) => d,
+            OpenDoc::Pdf(d) => Some(d),
+            OpenDoc::Reflow(d) => Some(d),
+            OpenDoc::Fixed(_) => None,
         }
     }
 
     pub fn is_pdf(&self) -> bool {
         matches!(self, OpenDoc::Pdf(_))
     }
+}
+
+/// What a book says about how to show it.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct BookInfo {
+    pub title: Option<String>,
+    /// Pages go right to left (manga).
+    pub rtl: bool,
+    pub spread: SpreadPref,
+    /// Per page.
+    pub sides: Vec<SpreadSide>,
+    /// Fixed layout (pages are pictures of a fixed size).
+    pub fixed: bool,
 }
 
 #[derive(Debug)]
@@ -87,8 +113,10 @@ pub struct DocInfo {
     pub strokes: Vec<Stroke>,
     pub password: Option<String>,
     pub mtime: Option<SystemTime>,
-    /// EPUB and friends: laid out by MuPDF, read-only.
+    /// EPUB and friends: read-only.
     pub reflowable: bool,
+    /// Present for EPUBs.
+    pub book: Option<BookInfo>,
 }
 
 #[derive(Debug, Clone, thiserror::Error)]
@@ -155,6 +183,23 @@ pub fn open_document(
     reflow: Reflow,
 ) -> Result<OpenDoc, OpenError> {
     if is_epub(path) {
+        let fixed = zip::Zip::open(path)
+            .ok()
+            .and_then(|z| fxl::read_from(&z).map(|b| (z, b)));
+        let mut reflow = reflow;
+        match fixed {
+            Some((zip, book)) if book.all_images() => {
+                return Ok(OpenDoc::Fixed(FixedDoc { zip, book }));
+            }
+            Some((_, book)) => {
+                // Fixed-layout pages that are not just pictures: let MuPDF
+                // lay them out at the size the book asks for.
+                let p = &book.pages[0];
+                reflow.w = p.w;
+                reflow.h = p.h;
+            }
+            None => {}
+        }
         let mut doc = open_raw(path, true)?;
         doc.layout(reflow.w, reflow.h, reflow.em)?;
         return Ok(OpenDoc::Reflow(doc));
@@ -206,7 +251,38 @@ fn flatten_outline(items: &[mupdf::Outline], level: u8, out: &mut Vec<OutlineIte
 /// Read everything the UI needs to lay out the document.
 pub fn load(path: &Path, password: Option<&str>, reflow: Reflow) -> Result<DocInfo, OpenError> {
     let opened = open_document(path, password, reflow)?;
-    let doc = opened.doc();
+    let mtime = std::fs::metadata(path).and_then(|m| m.modified()).ok();
+    if let OpenDoc::Fixed(f) = &opened {
+        let b = &f.book;
+        return Ok(DocInfo {
+            path: path.to_path_buf(),
+            pages: b
+                .pages
+                .iter()
+                .map(|p| PageMeta {
+                    w: p.w,
+                    h: p.h,
+                    x0: 0.0,
+                    y0: 0.0,
+                })
+                .collect(),
+            outline: b.outline.clone(),
+            strokes: Vec::new(),
+            password: None,
+            mtime,
+            reflowable: true,
+            book: Some(BookInfo {
+                title: b.title.clone(),
+                rtl: b.rtl,
+                spread: b.spread,
+                sides: b.pages.iter().map(|p| p.side).collect(),
+                fixed: true,
+            }),
+        });
+    }
+    let doc = opened
+        .doc()
+        .ok_or_else(|| OpenError::Failed("no document".into()))?;
     let count = doc.page_count()?.max(0) as usize;
     let mut pages = Vec::with_capacity(count);
     let mut strokes = Vec::new();
@@ -238,7 +314,17 @@ pub fn load(path: &Path, password: Option<&str>, reflow: Reflow) -> Result<DocIn
     if let Ok(o) = doc.outlines() {
         flatten_outline(&o, 0, &mut outline);
     }
-    let mtime = std::fs::metadata(path).and_then(|m| m.modified()).ok();
+    let book = (!opened.is_pdf()).then(|| {
+        // A reflowable book still has a direction and a title.
+        let fixed = fxl::read(path);
+        BookInfo {
+            title: fixed.as_ref().and_then(|b| b.title.clone()),
+            rtl: fixed.as_ref().map(|b| b.rtl).unwrap_or(false),
+            spread: SpreadPref::None,
+            sides: vec![SpreadSide::Auto; count],
+            fixed: fixed.is_some(),
+        }
+    });
     Ok(DocInfo {
         path: path.to_path_buf(),
         pages,
@@ -247,5 +333,6 @@ pub fn load(path: &Path, password: Option<&str>, reflow: Reflow) -> Result<DocIn
         password: password.map(str::to_string),
         mtime,
         reflowable: !opened.is_pdf(),
+        book,
     })
 }

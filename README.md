@@ -124,6 +124,7 @@ Counts work like in Vim: `5j`, `12G`.
 | `r` | reload the file |
 | `:` | command line |
 | `F1`, `:help` | every key and command |
+| `zs` | two-page spreads on / off |
 | `ZZ` `ZQ` | save and quit / quit without saving |
 
 In drawing mode:
@@ -154,6 +155,7 @@ the platform reports it. A pen with pressure draws variable-width lines (see *St
 | `:width 2`, `:width` | set the pen width (points), or show it |
 | `:recent` | recently opened files |
 | `:fontsize 14` | EPUB: lay the book out again with another text size |
+| `:spread [on\|off\|auto]`, `:direction rtl\|ltr` | two-page spreads and their reading direction |
 | `:help` | every key and command |
 
 Saving is explicit, like in Vim: nothing is written until you say `:w`.
@@ -247,7 +249,22 @@ zero frames and uses no CPU.
 
 ## EPUB
 
-EPUB books are laid out by MuPDF to a virtual page (480 × 680 pt by default, see `[epub]` in
+**Comics and manga** (fixed-layout EPUBs, `rendition:layout` = `pre-paginated`) are shown page by
+page at the size each page asks for, straight from its image: no reflowing, no cropping. mizu
+reads the book's table of contents, its reading direction (`page-progression-direction`, so manga
+read right to left) and its spread hints (`rendition:spread`, `page-spread-left/right/center`).
+In a wide window, pages are shown as two-page spreads like an open book: the cover on its own,
+then pairs, with the first page of a pair on the right for right-to-left books; double pages
+stand alone. Comics open fitted to the page; `J` / `K` go a spread at a time.
+
+| | |
+|---|---|
+| `zs`, `:spread` | spreads on / off; `:spread auto` follows the book and the window shape |
+| `:direction rtl`, `:direction ltr` | which side the first page of a pair goes on |
+
+Both are remembered per book.
+
+**Text books** (reflowable EPUBs) are laid out by MuPDF to a virtual page (480 × 680 pt by default, see `[epub]` in
 the config) and then shown like any PDF page: tiles, zoom, dark mode, search, outline and links
 all work the same way. `:fontsize` lays the book out again and keeps your place; mizu also
 remembers the place per book. Books are **read-only**: drawing (`i`) and `:w` are PDF-only,

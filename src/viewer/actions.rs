@@ -3,7 +3,9 @@
 use std::path::PathBuf;
 use std::time::Instant;
 
-use super::{ListEntry, ListKind, LoadPurpose, Pos, Saving, Tool, UiMode, Viewer, MAX_JUMPS};
+use super::{
+    ListEntry, ListKind, LoadPurpose, Pos, Saving, SpreadMode, Tool, UiMode, Viewer, MAX_JUMPS,
+};
 use crate::doc::service::Job;
 use crate::input::command::{self, Command};
 use crate::input::{Action, Mode};
@@ -29,21 +31,35 @@ impl Viewer {
             PageDown => self.scroll_by(0.0, (view_h - step * 0.5) * n, true),
             PageUp => self.scroll_by(0.0, -(view_h - step * 0.5) * n, true),
             NextPage => {
-                let p = self.current_page() + n as usize;
+                // A row at a time: with spreads both pages of a pair.
+                let mut p = self.nav_page();
+                if let Some(d) = &self.doc {
+                    for _ in 0..n as usize {
+                        p = d.layout.next_row(p);
+                    }
+                }
                 self.goto_page(p, true);
             }
             PrevPage => {
                 // First `K` goes to the top of the current page if we are below it.
-                let cur = self.current_page();
-                let at_top = self
-                    .top_pos()
-                    .map(|t| t.page == cur && t.y.abs() < 2.0)
-                    .unwrap_or(true);
-                let target = if at_top || n > 1.0 {
-                    cur.saturating_sub(n as usize)
-                } else {
-                    cur
-                };
+                let cur = self.nav_page();
+                let at_top = self.anim_target.is_some()
+                    || self
+                        .top_pos()
+                        .map(|t| t.page == cur && t.y.abs() < 2.0)
+                        .unwrap_or(true);
+                let mut target = self
+                    .doc
+                    .as_ref()
+                    .map(|d| d.layout.row_of(cur))
+                    .unwrap_or(cur);
+                if at_top || n > 1.0 {
+                    if let Some(d) = &self.doc {
+                        for _ in 0..n as usize {
+                            target = d.layout.prev_row(target);
+                        }
+                    }
+                }
                 self.goto_page(target, true);
             }
             GotoFirst => {
@@ -114,6 +130,7 @@ impl Viewer {
             JumpForward => self.jump_forward(),
             Outline => self.open_outline(),
             Help => self.open_help(),
+            ToggleSpread => self.set_spread(Option::None),
             ToggleDark => {
                 let on = !self.dark;
                 self.set_dark(on);
@@ -513,6 +530,59 @@ impl Viewer {
         }
     }
 
+    /// The page J / K start from: where a running page animation is going,
+    /// so pressing J twice moves two pages.
+    fn nav_page(&self) -> usize {
+        match (&self.doc, self.anim_target) {
+            (Some(d), Some(t)) => d.layout.page_at_y(t[1] + self.camera.inset_doc() + 1.0),
+            _ => self.current_page(),
+        }
+    }
+
+    /// `:spread on|off|auto`; without an argument, toggle on/off.
+    pub fn set_spread(&mut self, mode: Option<&'static str>) {
+        if self.doc.is_none() {
+            self.error("No file open");
+            return;
+        }
+        let mode = match mode.and_then(SpreadMode::from_name) {
+            Some(m) => m,
+            Option::None => {
+                if self.spreads_active() {
+                    SpreadMode::Off
+                } else {
+                    SpreadMode::On
+                }
+            }
+        };
+        if let Some(d) = &mut self.doc {
+            d.spread = mode;
+        }
+        self.rebuild_layout();
+        let shown = if self.spreads_active() {
+            "two pages"
+        } else {
+            "one page"
+        };
+        self.info(format!("spread {}  ({shown})", mode.name()));
+    }
+
+    /// `:direction rtl|ltr`; without an argument, toggle.
+    pub fn set_direction(&mut self, rtl: Option<bool>) {
+        let Some(d) = &mut self.doc else {
+            self.error("No file open");
+            return;
+        };
+        d.rtl = rtl.unwrap_or(!d.rtl);
+        let rtl = d.rtl;
+        self.rebuild_layout();
+        self.info(if rtl {
+            "right to left"
+        } else {
+            "left to right"
+        });
+    }
+
     /// A file handed over by the system (Finder, the Dock): like `:e`.
     pub fn open_from_outside(&mut self, path: PathBuf) {
         if self.path() == Some(path.as_path()) {
@@ -627,6 +697,8 @@ impl Viewer {
             Command::Help => self.open_help(),
             Command::Recent => self.open_recent(),
             Command::FontSize(pt) => self.set_font_size(pt),
+            Command::Spread(mode) => self.set_spread(mode),
+            Command::Direction(rtl) => self.set_direction(rtl),
         }
         self.dirty = true;
     }

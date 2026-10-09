@@ -28,6 +28,12 @@ pub struct FileState {
     /// Position as a fraction of the whole document, for a changed layout.
     #[serde(default)]
     pub fraction: Option<f32>,
+    /// Books: "off" / "on" / "auto" two-page spreads.
+    #[serde(default)]
+    pub spread: Option<String>,
+    /// Books: pages right to left.
+    #[serde(default)]
+    pub rtl: Option<bool>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
