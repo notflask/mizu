@@ -1,7 +1,8 @@
 //! What the status line says, and the highlight list for the renderer.
 
-use super::{Tool, UiMode, Viewer};
-use crate::render::ui::{ListOverlay, UiState};
+use super::{ListKind, Tool, UiMode, Viewer};
+use crate::render::recolor::{recolor_srgb8, DarkTheme};
+use crate::render::ui::{ListOverlay, PenUi, Popup, PopupRow, Titlebar, UiState};
 use crate::render::Highlight;
 
 impl Viewer {
@@ -27,6 +28,17 @@ impl Viewer {
         }
     }
 
+    /// A pen colour as it looks on the page right now (recoloured in dark
+    /// mode, like the ink itself).
+    pub fn display_color(&self, c: [u8; 3]) -> [u8; 3] {
+        if self.dark {
+            let t = DarkTheme::from_srgb8(self.theme.dark_fg, self.theme.dark_bg);
+            recolor_srgb8(c, &t)
+        } else {
+            c
+        }
+    }
+
     pub fn ui_state(&self) -> UiState {
         let mut st = UiState {
             statusbar: self.settings.statusbar,
@@ -38,17 +50,23 @@ impl Viewer {
             (UiMode::Draw, Tool::Pen) => "DRAW",
             (UiMode::Command, _) => "COMMAND",
             (UiMode::Search { .. }, _) => "SEARCH",
-            (UiMode::Outline, _) => "OUTLINE",
+            (UiMode::Outline, _) => match self.list_kind {
+                ListKind::Outline => "OUTLINE",
+                ListKind::Help => "HELP",
+                ListKind::Recent => "RECENT",
+            },
             (UiMode::Password, _) => "PASSWORD",
             _ => "NORMAL",
         };
 
         // Input line (":", "/", "?" or the masked password prompt).
         st.input = match self.mode {
-            UiMode::Command => Some(format!(":{}▏", self.line)),
-            UiMode::Search { forward } => {
-                Some(format!("{}{}▏", if forward { '/' } else { '?' }, self.line))
-            }
+            UiMode::Command => Some(format!(":{}", self.line_display().0)),
+            UiMode::Search { forward } => Some(format!(
+                "{}{}",
+                if forward { '/' } else { '?' },
+                self.line_display().0
+            )),
             UiMode::Password => Some(format!(
                 "Password: {}▏",
                 "*".repeat(self.line.chars().count())
@@ -103,30 +121,66 @@ impl Viewer {
         }
         st.right = right;
 
+        if self.mode == UiMode::Command {
+            st.ghost = self.line_display().1;
+            let sg = &self.completion.sugg;
+            if !sg.items.is_empty() {
+                st.popup = Some(Popup {
+                    rows: sg
+                        .items
+                        .iter()
+                        .map(|c| PopupRow {
+                            label: c.label.clone(),
+                            detail: match (c.hint.is_empty(), c.help.is_empty()) {
+                                (false, false) => format!("{}  {}", c.hint, c.help),
+                                (false, true) => c.hint.clone(),
+                                _ => c.help.clone(),
+                            },
+                            swatch: c.swatch.map(|x| self.display_color(x)),
+                        })
+                        .collect(),
+                    selected: self.completion.selected,
+                    // One column for the ":".
+                    column: 1 + self.line[..sg.word_start.min(self.line.len())]
+                        .chars()
+                        .count(),
+                });
+            }
+        }
+
         if self.mode == UiMode::Draw {
             let text = match self.tool {
                 Tool::Pen => format!("{:.1}pt", self.pen_width),
                 Tool::Eraser => "eraser".to_string(),
             };
-            st.pen = Some((self.pen_color, text));
+            st.pen = Some(PenUi {
+                palette: self
+                    .settings
+                    .palette
+                    .iter()
+                    .map(|c| self.display_color(*c))
+                    .collect(),
+                selected: self
+                    .settings
+                    .palette
+                    .iter()
+                    .position(|c| *c == self.pen_color),
+                color: self.display_color(self.pen_color),
+                text,
+            });
         }
 
         if self.mode == UiMode::Outline {
-            let vis = self.outline_visible();
-            let lines: Vec<String> = vis
-                .iter()
-                .map(|(_, o)| {
-                    let indent = "  ".repeat(o.level as usize);
-                    match o.page {
-                        Some(p) => format!("{indent}{}  ·  {}", o.title, p + 1),
-                        None => format!("{indent}{}", o.title),
-                    }
-                })
-                .collect();
+            let lines: Vec<String> = self.list_visible().into_iter().map(|(_, t)| t).collect();
+            let name = match self.list_kind {
+                ListKind::Outline => "Outline",
+                ListKind::Help => "Help",
+                ListKind::Recent => "Recent files",
+            };
             let title = if self.outline_filter.is_empty() && !self.outline_filtering {
-                "Outline   (j/k move · / filter · Enter jump · Esc close)".to_string()
+                format!("{name}   (j/k move · / filter · Enter open · Esc close)")
             } else {
-                format!("Outline  /{}", self.outline_filter)
+                format!("{name}  /{}", self.outline_filter)
             };
             st.overlay = Some(ListOverlay {
                 title,
@@ -135,8 +189,19 @@ impl Viewer {
             });
         }
 
+        if self.camera.top_inset > 0.0 {
+            st.titlebar = Some(Titlebar {
+                height: self.camera.top_inset,
+                text: match &name {
+                    Some(n) if self.is_dirty() => format!("{n}  ●"),
+                    Some(n) => n.clone(),
+                    None => "mizu".into(),
+                },
+            });
+        }
+
         if self.doc.is_none() && !self.is_loading() && self.mode != UiMode::Password {
-            st.hint = Some("mizu — :e <file>".into());
+            st.hint = Some("mizu — :e <file>   ·   :recent".into());
         }
         st
     }

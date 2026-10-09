@@ -11,10 +11,15 @@ A small PDF viewer I wrote for studying. It does four things and tries to do the
 - **Is driven from the keyboard** with Vim keys: `j`/`k`, `gg`/`G`, `/` search, marks, `:` commands.
 - **Lets you scribble on the PDF** with a pen, an eraser and undo/redo, and saves the ink *into* the PDF.
 
+It also reads **EPUB** books, with the same keys, dark mode, search and table of contents.
+
 No toolbar, no menus, no sidebar. A page and one line of status at the bottom, similar in spirit to
 zathura and sioyek.
 
 It runs on Linux (the machine I actually use it on: NixOS with Niri and Hyprland), Windows and macOS.
+On macOS the window has no grey title bar: the page goes up to the top edge, the traffic lights sit
+on a thin strip with the file name (drag it to move the window, double-click it to zoom), and the
+window follows mizu's dark mode. Double-clicking a PDF or EPUB in Finder opens it in mizu.
 
 <p align="center">
   <img src="docs/screenshots/light.png" width="48%" alt="light page with a search hit">
@@ -30,7 +35,29 @@ It is also a good excuse to learn how far you can push a GPU-composited document
 
 ## Install
 
-### Nix / NixOS
+### The install script (Linux and macOS)
+
+```sh
+git clone https://github.com/notflask/mizu && cd mizu
+./scripts/install.sh
+```
+
+It builds mizu from the checkout and installs it for your user:
+
+- **NixOS / Nix**: into your Nix profile (`nix profile add`), with the wrapper that finds the
+  Wayland, Vulkan and xkb libraries, the desktop entry and the icons.
+- **Other Linux distributions**: `~/.local/bin/mizu`, the desktop entry and the icons under
+  `~/.local/share`. Missing build dependencies are listed with the install command for your
+  distribution (apt, dnf, pacman, zypper).
+- **macOS**: `~/Applications/mizu.app` (registered with Launch Services, so "Open With" knows it)
+  and a `mizu` command in `~/.local/bin`.
+
+Running it again upgrades in place. Useful options: `--system` (all users: `/usr/local`,
+`/Applications`), `--prefix DIR`, `--universal` (macOS, arm64 + x86_64), `--default-pdf` (make
+mizu the default PDF/EPUB app; never done without asking), `--dry-run`, and `--uninstall`, which
+removes exactly the files it installed.
+
+### Nix / NixOS, declaratively
 
 ```sh
 nix run github:notflask/mizu -- some.pdf
@@ -47,7 +74,7 @@ environment.systemPackages = [ pkgs.mizu ];
 The flake wraps the binary so that the Wayland, Vulkan and xkb libraries are found at run time.
 `nix develop` gives you a shell with everything needed to build it.
 
-### From source
+### By hand
 
 You need a recent stable Rust and `clang` (MuPDF is compiled from the sources that ship with the
 `mupdf` crate, and its bindings are generated with bindgen).
@@ -62,7 +89,7 @@ driver have to be present at run time.
 
 ### Prebuilt binaries
 
-Tagged releases carry a Linux tarball, a Windows zip and a macOS app bundle.
+Tagged releases carry a Linux tarball, an AppImage, a Windows zip and a macOS app bundle.
 (Windows and macOS builds are produced by CI; I have mostly tested on Linux.)
 
 ## Using it
@@ -71,7 +98,7 @@ Tagged releases carry a Linux tarball, a Windows zip and a macOS app bundle.
 mizu [--page N] [--stats] [FILE]
 ```
 
-Drop a PDF onto the window or type `:e path/to/file.pdf`. Mizu remembers where you were in every
+Drop a PDF or EPUB onto the window or type `:e path/to/file.pdf`. Mizu remembers where you were in every
 file, and your marks, between runs.
 
 ### Keys
@@ -96,6 +123,7 @@ Counts work like in Vim: `5j`, `12G`.
 | `u` `Ctrl-r` | undo / redo |
 | `r` | reload the file |
 | `:` | command line |
+| `F1`, `:help` | every key and command |
 | `ZZ` `ZQ` | save and quit / quit without saving |
 
 In drawing mode:
@@ -105,7 +133,7 @@ In drawing mode:
 | left drag | draw (or erase, when the eraser is active) |
 | right drag | erase while held |
 | middle drag | pan |
-| `1`–`9` | pick a colour from the palette |
+| `1`–`9` | pick a colour from the palette (shown in the status line) |
 | `[` `]` | thinner / thicker |
 | `e` | switch between pen and eraser |
 
@@ -122,9 +150,25 @@ the platform reports it. A pen with pressure draws variable-width lines (see *St
 | `:e file.pdf`, `:e!` | open a file, reload and drop unsaved ink |
 | `:42` | go to page 42 |
 | `:dark`, `:light` | switch the page colours |
-| `:color #rrggbb`, `:width 2` | pen colour and width (points) |
+| `:color #rrggbb`, `:color red`, `:color 3` | pen colour: hex, a name, or a palette entry |
+| `:width 2`, `:width` | set the pen width (points), or show it |
+| `:recent` | recently opened files |
+| `:fontsize 14` | EPUB: lay the book out again with another text size |
+| `:help` | every key and command |
 
 Saving is explicit, like in Vim: nothing is written until you say `:w`.
+
+The command line suggests as you type: matching commands (with what they take), files for `:e`
+and `:w`, colours for `:color`. The best match appears in grey after the cursor; `→` or `Ctrl-e`
+takes it. `Tab` completes as far as all suggestions agree, and pressing it again walks through
+them (`Shift-Tab` backwards). The line can be edited like a shell: `←` `→`, `Home` `End`,
+`Ctrl-a` `Ctrl-e`, `Ctrl-w`, `Ctrl-u`, `Ctrl-k`. `↑` `↓` walk the history, limited to entries
+that start with what you typed.
+
+Keys work with any keyboard layout: characters typed with Option (macOS) or AltGr (`[`, `]`, `{`
+on a German keyboard) match their bindings, and with a non-Latin layout (Cyrillic, Greek, …) the
+letters of a US keyboard are used for commands. Pen colour and width are remembered between runs,
+and so is the window size.
 
 ### Configuration
 
@@ -146,6 +190,11 @@ foreground = "#ffffff"
 [pen]
 width = 1.5
 palette = ["#1a1a1a", "#e03131", "#1971c2", "#2f9e44", "#f08c00", "#9c36b5"]
+
+[epub]
+page_width = 480          # points; the virtual page books are laid out to
+page_height = 680
+font_size = 11
 
 [keys.normal]
 "<C-n>" = "toggle_dark"   # add or override a binding
@@ -196,6 +245,17 @@ from their in-memory copy), which is how they stay editable.
 **Idle means idle.** The event loop sleeps until something happens. When nothing changes, mizu draws
 zero frames and uses no CPU.
 
+## EPUB
+
+EPUB books are laid out by MuPDF to a virtual page (480 × 680 pt by default, see `[epub]` in
+the config) and then shown like any PDF page: tiles, zoom, dark mode, search, outline and links
+all work the same way. `:fontsize` lays the book out again and keeps your place; mizu also
+remembers the place per book. Books are **read-only**: drawing (`i`) and `:w` are PDF-only,
+because ink cannot be stored inside an EPUB and would drift whenever the text is laid out again.
+Fonts that a book does not embed come from MuPDF's built-in set and the system fonts.
+EPUB support (MuPDF's HTML engine) adds about 3 MB to the binary: the stripped Linux release build
+is 19.1 MB instead of 16 MB.
+
 ## Status
 
 Works and is tested: viewing, zoom, scrolling, dark mode, search (with smartcase), outline, links,
@@ -204,10 +264,12 @@ auto-reload when the file changes on disk, password-protected PDFs, and session 
 
 Things to know:
 
-- Pen **pressure** and **eraser end** are used where the windowing layer provides them. Windows and
-  macOS pens arrive through winit's touch events with force. On Wayland the tablet and pinch
-  protocols are not wired up yet, so a pen currently behaves like a mouse there and touchpad pinch
-  falls back to `Ctrl` + scroll.
+- Pen **pressure** and the **eraser end**: on Wayland through `tablet-v2` (with touchpad pinch through
+  `pointer-gestures`); on macOS through the system's tablet events; on X11 through XInput 2 (the
+  tablet's pressure axis; pinch through XInput 2.4 gestures); on Windows through pointer messages.
+  Without a tablet, or on a compositor without these protocols, mizu falls back to mouse behaviour
+  and `Ctrl` + scroll. The macOS, X11 and Windows paths are written against the platform APIs and
+  type-checked, but have seen less real use than Wayland.
 - There is no text selection or copying. That is deliberate for now: it is a reader with a pen.
 - I develop and test on Linux. The Windows and macOS builds compile in CI but have seen much less
   real use.

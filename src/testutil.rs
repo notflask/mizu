@@ -182,3 +182,150 @@ pub fn write_pdf(
     std::fs::write(&path, make_pdf(pages, extras)).expect("write fixture");
     path
 }
+
+/// A small EPUB 3 book: `chapters` are `(title, paragraph text)`. Chapter 1
+/// links to the last chapter. Written as a zip without compression.
+pub fn make_epub(chapters: &[(&str, &str)]) -> Vec<u8> {
+    let mut files: Vec<(String, String)> = Vec::new();
+    files.push(("mimetype".into(), "application/epub+zip".into()));
+    files.push((
+        "META-INF/container.xml".into(),
+        r#"<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles><rootfile full-path="OEBPS/book.opf" media-type="application/oebps-package+xml"/></rootfiles>
+</container>"#
+            .into(),
+    ));
+    let mut manifest = String::new();
+    let mut spine = String::new();
+    let mut nav = String::new();
+    let last = chapters.len();
+    for (i, (title, text)) in chapters.iter().enumerate() {
+        let n = i + 1;
+        manifest.push_str(&format!(
+            r#"<item id="c{n}" href="c{n}.xhtml" media-type="application/xhtml+xml"/>"#
+        ));
+        spine.push_str(&format!(r#"<itemref idref="c{n}"/>"#));
+        nav.push_str(&format!(r#"<li><a href="c{n}.xhtml">{title}</a></li>"#));
+        let link = if n == 1 && last > 1 {
+            format!(r#"<p><a href="c{last}.xhtml">Go to the end</a></p>"#)
+        } else {
+            String::new()
+        };
+        // Repeat the text so chapters span a few pages.
+        let body: String = (0..12).map(|_| format!("<p>{text}</p>")).collect();
+        files.push((
+            format!("OEBPS/c{n}.xhtml"),
+            format!(
+                r#"<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml"><head><title>{title}</title></head>
+<body><h1>{title}</h1>{link}{body}</body></html>"#
+            ),
+        ));
+    }
+    files.push((
+        "OEBPS/nav.xhtml".into(),
+        format!(
+            r#"<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><head><title>Contents</title></head>
+<body><nav epub:type="toc"><ol>{nav}</ol></nav></body></html>"#
+        ),
+    ));
+    files.push((
+        "OEBPS/book.opf".into(),
+        format!(
+            r#"<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="id">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:identifier id="id">mizu-test</dc:identifier><dc:title>Test</dc:title><dc:language>en</dc:language>
+  </metadata>
+  <manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>{manifest}</manifest>
+  <spine>{spine}</spine>
+</package>"#
+        ),
+    ));
+    stored_zip(&files)
+}
+
+/// Write a generated EPUB into `dir` and return its path.
+pub fn write_epub(
+    dir: &std::path::Path,
+    name: &str,
+    chapters: &[(&str, &str)],
+) -> std::path::PathBuf {
+    let path = dir.join(name);
+    std::fs::write(&path, make_epub(chapters)).expect("write fixture");
+    path
+}
+
+fn crc32(data: &[u8]) -> u32 {
+    let mut crc = !0u32;
+    for &b in data {
+        crc ^= b as u32;
+        for _ in 0..8 {
+            crc = if crc & 1 != 0 {
+                (crc >> 1) ^ 0xEDB8_8320
+            } else {
+                crc >> 1
+            };
+        }
+    }
+    !crc
+}
+
+/// A zip archive with every file stored (no compression).
+fn stored_zip(files: &[(String, String)]) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut central = Vec::new();
+    let u16le = |v: &mut Vec<u8>, x: u16| v.extend_from_slice(&x.to_le_bytes());
+    let u32le = |v: &mut Vec<u8>, x: u32| v.extend_from_slice(&x.to_le_bytes());
+    for (name, data) in files {
+        let (name, data) = (name.as_bytes(), data.as_bytes());
+        let crc = crc32(data);
+        let offset = out.len() as u32;
+        u32le(&mut out, 0x0403_4b50);
+        for x in [20u16, 0, 0, 0, 0] {
+            u16le(&mut out, x); // version, flags, method, time, date
+        }
+        u32le(&mut out, crc);
+        u32le(&mut out, data.len() as u32);
+        u32le(&mut out, data.len() as u32);
+        u16le(&mut out, name.len() as u16);
+        u16le(&mut out, 0);
+        out.extend_from_slice(name);
+        out.extend_from_slice(data);
+
+        u32le(&mut central, 0x0201_4b50);
+        for x in [20u16, 20, 0, 0, 0, 0] {
+            u16le(&mut central, x); // made by, needed, flags, method, time, date
+        }
+        u32le(&mut central, crc);
+        u32le(&mut central, data.len() as u32);
+        u32le(&mut central, data.len() as u32);
+        u16le(&mut central, name.len() as u16);
+        for x in [0u16, 0, 0, 0] {
+            u16le(&mut central, x); // extra, comment, disk, internal attrs
+        }
+        u32le(&mut central, 0);
+        u32le(&mut central, offset);
+        central.extend_from_slice(name);
+    }
+    let cd_offset = out.len() as u32;
+    out.extend_from_slice(&central);
+    u32le(&mut out, 0x0605_4b50);
+    for x in [0u16, 0, files.len() as u16, files.len() as u16] {
+        u16le(&mut out, x);
+    }
+    u32le(&mut out, central.len() as u32);
+    u32le(&mut out, cd_offset);
+    u16le(&mut out, 0);
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn crc32_matches_the_reference() {
+        assert_eq!(super::crc32(b"123456789"), 0xCBF4_3926);
+    }
+}

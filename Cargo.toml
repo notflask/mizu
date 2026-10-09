@@ -17,7 +17,7 @@ default = []
 profile = ["profiling/profile-with-tracy"]
 
 [dependencies]
-mupdf = { version = "0.8.0", default-features = false, features = ["system-fonts", "base14-fonts"] }
+mupdf = { version = "0.8.0", default-features = false, features = ["system-fonts", "base14-fonts", "epub"] }
 winit = { version = "0.30.13", default-features = false, features = ["rwh_06", "x11", "wayland", "wayland-dlopen", "wayland-csd-adwaita"] }
 wgpu = { version = "30", default-features = false, features = ["wgsl", "vulkan", "gles", "metal", "dx12", "std", "parking_lot"] }
 glyphon = "0.12.0"

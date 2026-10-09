@@ -24,19 +24,58 @@ pub struct ListOverlay {
     pub selected: usize,
 }
 
+/// Suggestions above the command line.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Popup {
+    pub rows: Vec<PopupRow>,
+    pub selected: Option<usize>,
+    /// Character column of the input line the list is aligned with.
+    pub column: usize,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct PopupRow {
+    pub label: String,
+    pub detail: String,
+    /// Display colour of a swatch in front of the label.
+    pub swatch: Option<[u8; 3]>,
+}
+
+/// The pen indicator of Draw mode: the palette (display colours), which
+/// entry is in use, the current colour and its text (`1.5pt`).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PenUi {
+    pub palette: Vec<[u8; 3]>,
+    pub selected: Option<usize>,
+    pub color: [u8; 3],
+    pub text: String,
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct UiState {
     pub statusbar: bool,
     pub left: String,
     pub left_is_error: bool,
     pub right: String,
-    /// Colour and text of the pen indicator in the status bar.
-    pub pen: Option<([u8; 3], String)>,
+    pub pen: Option<PenUi>,
     /// `:` / `/` input line, shown instead of `left`.
     pub input: Option<String>,
+    /// Grey completion shown after the input line.
+    pub ghost: String,
+    pub popup: Option<Popup>,
     pub overlay: Option<ListOverlay>,
     pub hint: Option<String>,
     pub dark: bool,
+    /// macOS: the strip under the transparent title bar.
+    pub titlebar: Option<Titlebar>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Titlebar {
+    /// Height in physical pixels.
+    pub height: f32,
+    /// Centred, dimmed (the file name).
+    pub text: String,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -58,6 +97,9 @@ pub struct Ui {
     title: Buffer,
     list: Buffer,
     hint: Buffer,
+    ghost: Buffer,
+    popup: Buffer,
+    title_bar: Buffer,
     shown: UiState,
     shown_layout: Option<Layout>,
     system_fonts_loaded: bool,
@@ -75,6 +117,9 @@ enum Which {
     Title,
     List,
     Hint,
+    Ghost,
+    Popup,
+    TitleBar,
 }
 
 struct Area {
@@ -118,6 +163,9 @@ impl Ui {
         let title = mk(&mut font_system);
         let list = mk(&mut font_system);
         let hint = mk(&mut font_system);
+        let ghost = mk(&mut font_system);
+        let popup = mk(&mut font_system);
+        let title_bar = mk(&mut font_system);
         Ui {
             font_system,
             swash: SwashCache::new(),
@@ -130,6 +178,9 @@ impl Ui {
             title,
             list,
             hint,
+            ghost,
+            popup,
+            title_bar,
             shown: UiState::default(),
             shown_layout: None,
             system_fonts_loaded: false,
@@ -162,10 +213,39 @@ impl Ui {
             Which::Title => &mut self.title,
             Which::List => &mut self.list,
             Which::Hint => &mut self.hint,
+            Which::Ghost => &mut self.ghost,
+            Which::Popup => &mut self.popup,
+            Which::TitleBar => &mut self.title_bar,
         };
         buf.set_metrics(metrics);
         buf.set_size(w, h);
         buf.set_text(text, &attrs(), Shaping::Advanced, None);
+        buf.shape_until_scroll(&mut self.font_system, false);
+    }
+
+    /// Like `set_text`, with coloured spans.
+    fn set_rich(
+        &mut self,
+        which: Which,
+        spans: &[(String, [u8; 3])],
+        size: [f32; 2],
+        metrics: Metrics,
+    ) {
+        let plain: String = spans.iter().map(|(t, _)| t.as_str()).collect();
+        self.set_text(which, &plain, Some(size[0]), Some(size[1]), metrics);
+        let buf = match which {
+            Which::Popup => &mut self.popup,
+            _ => return,
+        };
+        let base = attrs();
+        buf.set_rich_text(
+            spans
+                .iter()
+                .map(|(t, c)| (t.as_str(), base.clone().color(Color::rgb(c[0], c[1], c[2])))),
+            &base,
+            Shaping::Advanced,
+            None,
+        );
         buf.shape_until_scroll(&mut self.font_system, false);
     }
 
@@ -249,13 +329,14 @@ impl Ui {
                     bounds: [0, bar_top as i32, w as i32, h as i32],
                     color: dim,
                 });
-                if let Some((_, text)) = &state.pen {
+                if let Some(pen) = &state.pen {
                     x_right -= 2.0 * cw;
+                    let text = pen_text(pen);
                     let pen_w = text.chars().count() as f32 * cw;
                     x_right -= pen_w;
                     self.set_text(
                         Which::Pen,
-                        text,
+                        &text,
                         Some(pen_w + cw),
                         Some(line_h * 1.5),
                         metrics,
@@ -291,6 +372,70 @@ impl Ui {
                     top: text_top,
                     bounds: [0, bar_top as i32, x_right.max(cw) as i32, h as i32],
                     color,
+                });
+            }
+            if let (Some(input), false) = (&state.input, state.ghost.is_empty()) {
+                // Over the cursor's cell: the bar sits at its left edge.
+                let x = pad + (input.chars().count() as f32 - 0.85) * cw;
+                let gw = state.ghost.chars().count() as f32 * cw;
+                self.set_text(
+                    Which::Ghost,
+                    &state.ghost,
+                    Some(gw + cw),
+                    Some(line_h * 1.5),
+                    metrics,
+                );
+                self.areas.push(Area {
+                    which: Which::Ghost,
+                    left: x,
+                    top: text_top,
+                    bounds: [0, bar_top as i32, w as i32, h as i32],
+                    color: dim,
+                });
+            }
+            if let Some(p) = &state.popup {
+                let g = popup_geometry(p, w, bar_top, cw, line_h, pad);
+                let mut spans = Vec::new();
+                for (i, r) in p.rows[g.first..g.first + g.shown].iter().enumerate() {
+                    if i > 0 {
+                        spans.push(("\n".to_string(), fg));
+                    }
+                    let lead = if g.swatches { "   " } else { "" };
+                    let pad_n = g.label_w - r.label.chars().count();
+                    spans.push((format!("{lead}{}{}", r.label, " ".repeat(pad_n)), fg));
+                    if !r.detail.is_empty() {
+                        spans.push((format!("  {}", r.detail), dim));
+                    }
+                }
+                self.set_rich(
+                    Which::Popup,
+                    &spans,
+                    [g.w, line_h * (g.shown as f32 + 1.0)],
+                    metrics,
+                );
+                self.areas.push(Area {
+                    which: Which::Popup,
+                    left: g.x + pad * 0.5,
+                    top: g.y + pad * 0.25,
+                    bounds: [g.x as i32, g.y as i32, (g.x + g.w) as i32, bar_top as i32],
+                    color: fg,
+                });
+            }
+            if let Some(tb) = &state.titlebar {
+                let tw = tb.text.chars().count() as f32 * cw;
+                self.set_text(
+                    Which::TitleBar,
+                    &tb.text,
+                    Some(tw + cw),
+                    Some(line_h * 1.5),
+                    metrics,
+                );
+                self.areas.push(Area {
+                    which: Which::TitleBar,
+                    left: ((w - tw) * 0.5).max(0.0),
+                    top: ((tb.height - line_h) * 0.5).max(0.0),
+                    bounds: [0, 0, w as i32, tb.height as i32],
+                    color: dim,
                 });
             }
             if let Some(hint) = &state.hint {
@@ -375,6 +520,9 @@ impl Ui {
                         Which::Title => &self.title,
                         Which::List => &self.list,
                         Which::Hint => &self.hint,
+                        Which::Ghost => &self.ghost,
+                        Which::Popup => &self.popup,
+                        Which::TitleBar => &self.title_bar,
                     };
                     TextArea {
                         buffer,
@@ -416,29 +564,100 @@ impl Ui {
                 self.bar_height,
                 [c[0], c[1], c[2], 1.0],
             ));
-            if let (Some((color, _)), None) = (&state.pen, &state.input) {
-                // Swatch left of the pen text.
+            if let (Some(pen), None) = (&state.pen, &state.input) {
+                // Palette swatches and the current colour, in the pen text's
+                // reserved cells (see `pen_text`).
                 let info_w = state.right.chars().count() as f32 * cw;
-                let pen_w = state
-                    .pen
-                    .as_ref()
-                    .map(|(_, t)| t.chars().count())
-                    .unwrap_or(0) as f32
-                    * cw;
-                let x = w - pad - info_w - 2.0 * cw - pen_w;
-                let d = line_h * 0.55;
+                let pen_w = pen_text(pen).chars().count() as f32 * cw;
+                let x0 = w - pad - info_w - 2.0 * cw - pen_w;
+                let d = line_h * 0.5;
                 let cy = h - self.bar_height * 0.5;
-                let l = [
-                    lin(color[0] as f32 / 255.0),
-                    lin(color[1] as f32 / 255.0),
-                    lin(color[2] as f32 / 255.0),
-                ];
+                let ring = to_lin(if state.dark { [1.0; 3] } else { [0.0; 3] });
+                for (i, c) in pen.palette.iter().enumerate() {
+                    // "1 ●  " -> the swatch sits two cells after the digit.
+                    let cx = x0 + (i as f32 * 4.0 + 2.5) * cw;
+                    let l = to_lin8(*c);
+                    rects.push(OverlayInst::disc(
+                        cx - d * 0.5,
+                        cy - d * 0.5,
+                        d,
+                        [l[0], l[1], l[2], 1.0],
+                    ));
+                    if pen.selected == Some(i) {
+                        rects.push(OverlayInst::ring(
+                            cx,
+                            cy,
+                            d * 0.5 + 2.0 * dpr,
+                            1.2 * dpr,
+                            [ring[0], ring[1], ring[2], 0.9],
+                        ));
+                    }
+                }
+                let cx = x0 + (pen.palette.len() as f32 * 4.0 + 1.5) * cw;
+                let l = to_lin8(pen.color);
                 rects.push(OverlayInst::disc(
-                    x - d - cw * 0.4,
+                    cx - d * 0.5,
                     cy - d * 0.5,
                     d,
                     [l[0], l[1], l[2], 1.0],
                 ));
+            }
+        }
+        if let Some(tb) = &state.titlebar {
+            let c = to_lin(bg);
+            rects.push(OverlayInst::rect(
+                0.0,
+                0.0,
+                w,
+                tb.height,
+                [c[0], c[1], c[2], 1.0],
+            ));
+            let line = to_lin(if state.dark {
+                [0.10, 0.10, 0.10]
+            } else {
+                [0.77, 0.77, 0.77]
+            });
+            rects.push(OverlayInst::rect(
+                0.0,
+                tb.height - dpr,
+                w,
+                dpr,
+                [line[0], line[1], line[2], 1.0],
+            ));
+        }
+        if let Some(p) = &state.popup {
+            let bar_top = h - self.bar_height;
+            let g = popup_geometry(p, w, bar_top, cw, line_h, pad);
+            let c = to_lin(panel);
+            rects.push(OverlayInst::rect(
+                g.x,
+                g.y,
+                g.w,
+                g.h,
+                [c[0], c[1], c[2], 1.0],
+            ));
+            for (i, r) in p.rows[g.first..g.first + g.shown].iter().enumerate() {
+                let y = g.y + pad * 0.25 + i as f32 * line_h;
+                if p.selected == Some(g.first + i) {
+                    let s = to_lin(sel);
+                    rects.push(OverlayInst::rect(
+                        g.x + pad * 0.25,
+                        y,
+                        g.w - pad * 0.5,
+                        line_h,
+                        [s[0], s[1], s[2], 1.0],
+                    ));
+                }
+                if let Some(sw) = r.swatch {
+                    let d = line_h * 0.5;
+                    let l = to_lin8(sw);
+                    rects.push(OverlayInst::disc(
+                        g.x + pad * 0.5 + cw * 1.0 - d * 0.5,
+                        y + (line_h - d) * 0.5,
+                        d,
+                        [l[0], l[1], l[2], 1.0],
+                    ));
+                }
             }
         }
         if let Some(ov) = &state.overlay {
@@ -454,13 +673,7 @@ impl Ui {
             let px0 = (w - pw) * 0.5;
             let py0 = ((h - self.bar_height - ph) * 0.4).max(pad);
             let p = to_lin(panel);
-            rects.push(OverlayInst::rect(
-                px0,
-                py0,
-                pw,
-                ph,
-                [p[0], p[1], p[2], 0.97],
-            ));
+            rects.push(OverlayInst::rect(px0, py0, pw, ph, [p[0], p[1], p[2], 1.0]));
             if ov.selected >= first && ov.selected < first + shown {
                 let s = to_lin(sel);
                 let y = py0 + pad * 0.5 + line_h * 1.4 + (ov.selected - first) as f32 * line_h;
@@ -495,4 +708,71 @@ impl Ui {
 
 fn lin(c: f32) -> f32 {
     super::recolor::srgb_to_linear(c)
+}
+
+fn to_lin8(c: [u8; 3]) -> [f32; 3] {
+    super::recolor::to_linear3(c)
+}
+
+/// The pen indicator's text: `1  2  3 …` with a free cell after every digit
+/// for its swatch, then a free cell for the current colour and its text.
+fn pen_text(pen: &PenUi) -> String {
+    let mut t = String::new();
+    for i in 0..pen.palette.len() {
+        t.push_str(&format!("{}   ", i + 1));
+    }
+    t.push_str("   ");
+    t.push_str(&pen.text);
+    t
+}
+
+/// Rows of the suggestion list that fit at once.
+const POPUP_ROWS: usize = 8;
+
+struct PopupGeom {
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    first: usize,
+    shown: usize,
+    label_w: usize,
+    swatches: bool,
+}
+
+fn popup_geometry(p: &Popup, w: f32, bar_top: f32, cw: f32, line_h: f32, pad: f32) -> PopupGeom {
+    let shown = p.rows.len().min(POPUP_ROWS);
+    let first = match p.selected {
+        Some(s) if s >= shown => s + 1 - shown,
+        _ => 0,
+    };
+    let label_w = p
+        .rows
+        .iter()
+        .map(|r| r.label.chars().count())
+        .max()
+        .unwrap_or(0);
+    let detail_w = p
+        .rows
+        .iter()
+        .map(|r| r.detail.chars().count())
+        .max()
+        .unwrap_or(0);
+    let swatches = p.rows.iter().any(|r| r.swatch.is_some());
+    let chars =
+        label_w + if detail_w > 0 { detail_w + 2 } else { 0 } + if swatches { 3 } else { 0 };
+    let pw = (chars as f32 * cw + pad + cw).min(w - 2.0 * pad);
+    let ph = shown as f32 * line_h + pad * 0.5;
+    let x =
+        (pad + p.column as f32 * cw - pad * 0.5).clamp(pad * 0.5, (w - pw - pad * 0.5).max(0.0));
+    PopupGeom {
+        x,
+        y: bar_top - ph - 2.0,
+        w: pw,
+        h: ph,
+        first,
+        shown,
+        label_w,
+        swatches,
+    }
 }

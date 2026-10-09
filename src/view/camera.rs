@@ -25,6 +25,10 @@ pub struct Camera {
     pub dpr: f32,
     /// Size of the page area in physical pixels.
     pub viewport: [f32; 2],
+    /// Physical pixels at the top of the viewport that are covered (the
+    /// macOS title bar). Pages may scroll under it, but the first page
+    /// starts below it, and fitting and centring ignore it.
+    pub top_inset: f32,
     pub mode: ZoomMode,
 }
 
@@ -35,6 +39,7 @@ impl Default for Camera {
             zoom: 1.0,
             dpr: 1.0,
             viewport: [800.0, 600.0],
+            top_inset: 0.0,
             mode: ZoomMode::FitWidth,
         }
     }
@@ -109,7 +114,7 @@ impl Camera {
             ZoomMode::FitPage => {
                 if let Some(p) = layout.pages.get(page) {
                     let zw = self.viewport[0] / self.dpr / p.w;
-                    let zh = self.viewport[1] / self.dpr / p.h;
+                    let zh = (self.viewport[1] - self.top_inset).max(1.0) / self.dpr / p.h;
                     self.zoom = zw.min(zh).clamp(MIN_ZOOM, MAX_ZOOM);
                 }
             }
@@ -121,10 +126,16 @@ impl Camera {
         let s = self.scale();
         let view_w = self.viewport[0] / s;
         let view_h = self.viewport[1] / s;
+        let inset = self.top_inset / s;
         [
             clamp_axis(offset[0], layout.width, view_w),
-            clamp_axis(offset[1], layout.height, view_h),
+            clamp_axis(offset[1] + inset, layout.height, view_h - inset) - inset,
         ]
+    }
+
+    /// The covered top area in document units.
+    pub fn inset_doc(&self) -> f32 {
+        self.top_inset / self.scale()
     }
 
     /// Keep the view inside the document.
@@ -134,7 +145,7 @@ impl Camera {
 
     /// Document y of the viewport centre.
     pub fn center_y(&self) -> f32 {
-        self.offset[1] + self.viewport[1] / self.scale() * 0.5
+        self.offset[1] + (self.viewport[1] + self.top_inset) / self.scale() * 0.5
     }
 
     /// Scroll so that document y `y` is at the top of the viewport.
@@ -161,6 +172,7 @@ mod tests {
             zoom: 1.5,
             dpr: 2.0,
             viewport: [1600.0, 900.0],
+            top_inset: 0.0,
             mode: ZoomMode::Free,
         }
     }
@@ -233,5 +245,32 @@ mod tests {
         c.clamp(&narrow);
         let view_w = c.viewport[0] / c.scale();
         assert!((c.offset[0] - (100.0 - view_w) * 0.5).abs() < 1e-3);
+    }
+
+    #[test]
+    fn top_inset_keeps_the_first_page_below_it() {
+        let layout = Layout::new(&[(600.0, 800.0), (600.0, 800.0)]);
+        let mut c = Camera {
+            offset: [0.0, 0.0],
+            zoom: 1.0,
+            dpr: 2.0,
+            viewport: [1200.0, 1000.0],
+            top_inset: 56.0,
+            mode: ZoomMode::FitWidth,
+        };
+        c.apply_mode(&layout, 0);
+        c.offset = [0.0, -1000.0];
+        c.clamp(&layout);
+        // The top of page 1 sits right below the 56 px strip.
+        assert!((c.doc_to_screen([0.0, 0.0])[1] - 56.0).abs() < 1e-3);
+        // At the end, the last page ends at the bottom as before.
+        c.offset = [0.0, 1e6];
+        c.clamp(&layout);
+        let bottom = c.doc_to_screen([0.0, layout.height])[1];
+        assert!((bottom - 1000.0).abs() < 1e-3);
+        // Fit page uses the height below the strip.
+        c.mode = ZoomMode::FitPage;
+        c.apply_mode(&layout, 0);
+        assert!((c.zoom - (1000.0 - 56.0) / 2.0 / 800.0).abs() < 1e-4);
     }
 }

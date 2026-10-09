@@ -7,6 +7,6 @@ Exec=mizu %f
 Icon=io.github.notflask.Mizu
 Terminal=false
 Categories=Office;Viewer;
-MimeType=application/pdf;
+MimeType=application/pdf;application/epub+zip;
 StartupWMClass=io.github.notflask.Mizu
 Keywords=pdf;viewer;reader;vim;

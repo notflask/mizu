@@ -5,6 +5,7 @@
 mod actions;
 mod draw;
 pub mod input;
+mod line;
 mod search;
 mod status;
 
@@ -25,6 +26,7 @@ use crate::render::tiles;
 use crate::render::ui::Ui;
 use crate::render::{Highlight, Theme};
 use crate::session::{FileState, Session};
+use crate::view::spring;
 use crate::view::{Camera, Layout, ZoomMode};
 use crate::watch::Watcher;
 
@@ -95,6 +97,8 @@ pub struct DocState {
     _watcher: Option<Watcher>,
     watcher_rx: Option<Receiver<()>>,
     pub tile_scale: f32,
+    /// EPUB: laid out by MuPDF, read-only.
+    pub reflowable: bool,
 }
 
 pub enum LoadPurpose {
@@ -102,6 +106,9 @@ pub enum LoadPurpose {
     Open { page: Option<usize> },
     /// Reload the same file, keeping the view.
     Reload,
+    /// The same book laid out again (new text size): keep the reading
+    /// position, given as a fraction of the whole document.
+    Relayout { fraction: f32 },
 }
 
 struct Loader {
@@ -122,6 +129,20 @@ pub struct MouseState {
     pub inside: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ListKind {
+    Outline,
+    Help,
+    Recent,
+}
+
+/// A row of the help or recent-files list.
+#[derive(Clone, Debug)]
+pub struct ListEntry {
+    pub text: String,
+    pub file: Option<PathBuf>,
+}
+
 pub struct Viewer {
     pub settings: Settings,
     pub keymaps: Keymaps,
@@ -136,8 +157,16 @@ pub struct Viewer {
     pub message: Option<Msg>,
     /// Text of the `:` / `/` / password line.
     pub line: String,
+    /// Byte offset of the cursor in `line`.
+    pub line_cursor: usize,
+    completion: line::Completion,
     history_cmd: Vec<String>,
     history_idx: Option<usize>,
+    /// What was typed before walking the history.
+    history_prefix: String,
+    /// What the list overlay (`UiMode::Outline`) shows.
+    pub list_kind: ListKind,
+    list_items: Vec<ListEntry>,
     outline_filter: String,
     outline_filtering: bool,
     outline_sel: usize,
@@ -146,13 +175,22 @@ pub struct Viewer {
     pub tool: Tool,
     pub pen_color: [u8; 3],
     pub pen_width: f32,
+    /// Layout of EPUB books (`:fontsize` changes the text size).
+    pub reflow: crate::doc::Reflow,
     pub pen: draw::PenState,
+    /// X11: pressure (and eraser end) of the pen driving the mouse pointer.
+    pub pressure_hint: Option<(f32, bool)>,
     pub mouse: MouseState,
     pub quit: bool,
     close_armed: Option<Instant>,
     zoom_changed_at: Option<Instant>,
     last_scale: f32,
     anim_target: Option<[f32; 2]>,
+    /// Velocity of the scroll spring (document units per second).
+    anim_vel: [f32; 2],
+    /// The previous tick advanced the animation (so `last_tick` is a real
+    /// frame interval).
+    anim_running: bool,
     last_tick: Instant,
     /// Anything changed that needs a redraw.
     pub dirty: bool,
@@ -194,6 +232,8 @@ impl Viewer {
                 .copied()
                 .unwrap_or([0x1a, 0x1a, 0x1a]),
             pen_width: settings.pen_width,
+            reflow: settings.reflow,
+            pressure_hint: None,
             dark: settings.dark_by_default,
             theme,
             keymaps,
@@ -206,8 +246,13 @@ impl Viewer {
             window_size: [800, 600],
             message: None,
             line: String::new(),
+            line_cursor: 0,
+            completion: line::Completion::default(),
             history_cmd: Vec::new(),
             history_idx: None,
+            history_prefix: String::new(),
+            list_kind: ListKind::Outline,
+            list_items: Vec::new(),
             outline_filter: String::new(),
             outline_filtering: false,
             outline_sel: 0,
@@ -221,6 +266,8 @@ impl Viewer {
             zoom_changed_at: None,
             last_scale: 0.0,
             anim_target: None,
+            anim_vel: [0.0; 2],
+            anim_running: false,
             last_tick: Instant::now(),
             dirty: true,
             cache_epoch: 0,
@@ -268,6 +315,23 @@ impl Viewer {
     // ------------------------------------------------------------------
 
     /// Tell the viewer how large the window is and how sharp the display is.
+    /// Physical pixels covered at the top of the window (macOS title bar).
+    pub fn set_top_inset(&mut self, px: f32) {
+        if (self.camera.top_inset - px).abs() < 0.5 {
+            return;
+        }
+        let top = self.camera.offset[1] + self.camera.inset_doc();
+        self.camera.top_inset = px;
+        // Keep what was right below the old strip right below the new one.
+        self.camera.offset[1] = top - self.camera.inset_doc();
+        if let Some(d) = &self.doc {
+            let page = d.layout.page_at_y(self.camera.center_y());
+            self.camera.apply_mode(&d.layout, page);
+            self.camera.clamp(&d.layout);
+        }
+        self.dirty = true;
+    }
+
     pub fn set_window(&mut self, size: [u32; 2], dpr: f32) {
         self.window_size = size;
         self.camera.dpr = dpr;
@@ -296,11 +360,12 @@ impl Viewer {
     pub fn title(&self) -> String {
         match &self.doc {
             Some(d) => format!(
-                "{} — mizu",
+                "{}{} — mizu",
                 d.path
                     .file_name()
                     .map(|n| n.to_string_lossy().into_owned())
-                    .unwrap_or_default()
+                    .unwrap_or_default(),
+                if self.is_dirty() { " [+]" } else { "" }
             ),
             None => "mizu".to_string(),
         }
@@ -318,10 +383,11 @@ impl Viewer {
         let (tx, rx) = unbounded();
         let wake = self.wake.clone();
         let p = path.clone();
+        let reflow = self.reflow;
         let spawned = std::thread::Builder::new()
             .name("mizu-load".into())
             .spawn(move || {
-                let _ = tx.send(doc::load(&p, password.as_deref()));
+                let _ = tx.send(doc::load(&p, password.as_deref(), reflow));
                 wake();
             });
         if spawned.is_err() {
@@ -382,18 +448,32 @@ impl Viewer {
             ink.push(s);
         }
         let wake = self.wake.clone();
-        let pool = Pool::spawn(
+        let pool = Pool::spawn_reflow(
             info.path.clone(),
             info.password.clone(),
+            self.reflow,
             wake.clone(),
             crate::doc::worker::worker_count(),
         );
-        let service = Service::spawn(info.path.clone(), info.password.clone(), wake.clone());
+        let service = Service::spawn_reflow(
+            info.path.clone(),
+            info.password.clone(),
+            self.reflow,
+            wake.clone(),
+        );
         let watcher = crate::watch::watch(&info.path, wake);
         let watcher_rx = watcher.as_ref().map(|w| w.rx.clone());
 
         // Carry navigation state across a reload.
+        let relayout = match purpose {
+            LoadPurpose::Relayout { fraction } => Some(fraction),
+            _ => None,
+        };
         let (marks, jumps, jump_idx, keep_view) = match (&purpose, self.doc.take()) {
+            (LoadPurpose::Relayout { .. }, Some(_)) => {
+                // Page numbers mean something else after a new layout.
+                (BTreeMap::new(), Vec::new(), 0, true)
+            }
             (LoadPurpose::Reload, Some(old)) => {
                 let cap = |p: Pos| Pos {
                     page: p.page.min(n.saturating_sub(1)),
@@ -438,6 +518,7 @@ impl Viewer {
             _watcher: watcher,
             watcher_rx,
             tile_scale: 1.0,
+            reflowable: info.reflowable,
         };
 
         if !keep_view {
@@ -471,14 +552,26 @@ impl Viewer {
             self.camera.apply_mode(&state.layout, 0);
             self.camera.offset = [0.0, 0.0];
             if let Some(s) = &saved {
-                if s.page < n {
-                    self.camera.offset = [s.x, state.layout.pages[s.page].y + s.y_in_page];
+                let same_layout = !info.reflowable || s.font_size == Some(self.reflow.em);
+                match (same_layout, s.fraction) {
+                    (false, Some(f)) => {
+                        self.camera.offset = [s.x, f * state.layout.height];
+                    }
+                    _ if s.page < n => {
+                        self.camera.offset = [s.x, state.layout.pages[s.page].y + s.y_in_page];
+                    }
+                    _ => {}
                 }
             }
             if let Some(p) = page_override {
                 let p = p.min(n.saturating_sub(1));
                 self.camera.offset[1] = state.layout.pages[p].y;
             }
+        } else if let Some(f) = relayout {
+            self.camera.offset[1] = f * state.layout.height;
+            let page = state.layout.page_at_y(self.camera.center_y());
+            self.camera.apply_mode(&state.layout, page);
+            self.camera.offset[1] = f * state.layout.height;
         } else {
             let page = state.layout.page_at_y(self.camera.center_y());
             self.camera.apply_mode(&state.layout, page);
@@ -500,7 +593,9 @@ impl Viewer {
             self.mode = UiMode::Normal;
         }
         self.doc = Some(state);
-        if keep_view {
+        if relayout.is_some() {
+            self.info(format!("{} pages at {}pt", n, self.reflow.em));
+        } else if keep_view {
             self.info("reloaded");
         }
         self.dirty = true;
@@ -523,12 +618,32 @@ impl Viewer {
             dark: Some(self.dark),
             marks: d.marks.iter().map(|(c, p)| (*c, (p.page, p.y))).collect(),
             stamp: 0,
+            font_size: d.reflowable.then_some(self.reflow.em),
+            fraction: Some(self.camera.offset[1] / d.layout.height.max(1.0)),
         };
         self.session.set(&d.path, st);
     }
 
+    /// Restore the pen settings of the last run (the app calls this; tests
+    /// start from the config defaults).
+    pub fn restore_prefs(&mut self) {
+        if let Some(p) = self.session.pen {
+            self.pen_color = p.color;
+            self.pen_width = p.width.clamp(0.25, 20.0);
+        }
+    }
+
+    /// Put the pen settings into the (in-memory) session.
+    pub fn remember_prefs(&mut self) {
+        self.session.pen = Some(crate::session::PenPrefs {
+            color: self.pen_color,
+            width: self.pen_width,
+        });
+    }
+
     /// Persist the session (call when quitting or switching files).
     pub fn save_session(&mut self) {
+        self.remember_prefs();
         if let Some(d) = self.doc.take() {
             self.remember_view_of(&d);
             self.doc = Some(d);
@@ -664,6 +779,10 @@ impl Viewer {
         None
     }
 
+    pub fn is_animating(&self) -> bool {
+        self.anim_target.is_some()
+    }
+
     /// True when everything visible is sharp and nothing is moving.
     pub fn view_complete(&self, renderer: &crate::render::Renderer) -> bool {
         if self.is_loading() || self.anim_target.is_some() || self.zoom_changed_at.is_some() {
@@ -700,10 +819,7 @@ impl Viewer {
     /// Advance animations and timers. Returns when to wake up next and whether
     /// an animation is running (then a redraw is needed right away).
     pub fn tick(&mut self, now: Instant) -> Tick {
-        let dt = now
-            .saturating_duration_since(self.last_tick)
-            .as_secs_f32()
-            .min(0.1);
+        let dt = now.saturating_duration_since(self.last_tick).as_secs_f32();
         self.last_tick = now;
         let mut animating = false;
         let mut wake: Option<Instant> = None;
@@ -712,16 +828,25 @@ impl Viewer {
         };
 
         if let Some(target) = self.anim_target {
-            let k = 1.0 - (-dt * 22.0).exp();
+            // After idle, the time since the last frame is meaningless.
+            let dt = if self.anim_running {
+                dt.min(spring::MAX_DT)
+            } else {
+                spring::FIRST_DT
+            };
             let s = self.camera.scale();
             let mut done = true;
-            for (off, tgt) in self.camera.offset.iter_mut().zip(target) {
-                let diff = tgt - *off;
-                if diff.abs() * s > 0.3 {
-                    *off += diff * k;
+            let axes = self.camera.offset.iter_mut().zip(&mut self.anim_vel);
+            for ((off, vel), tgt) in axes.zip(target) {
+                let (p, v) = spring::step(*off, *vel, tgt, dt, spring::OMEGA);
+                // Within a third of a pixel and nearly still: snap.
+                if (tgt - p).abs() * s > 0.3 || v.abs() * s > 30.0 {
+                    *off = p;
+                    *vel = v;
                     done = false;
                 } else {
                     *off = tgt;
+                    *vel = 0.0;
                 }
             }
             if done {
@@ -730,7 +855,10 @@ impl Viewer {
                 animating = true;
             }
             self.dirty = true;
+        } else {
+            self.anim_vel = [0.0; 2];
         }
+        self.anim_running = animating;
         if let Some(m) = &self.message {
             if now >= m.until {
                 self.message = None;
@@ -778,6 +906,18 @@ impl Viewer {
 
     pub fn path(&self) -> Option<&Path> {
         self.doc.as_ref().map(|d| d.path.as_path())
+    }
+
+    pub fn is_reflowable(&self) -> bool {
+        self.doc.as_ref().map(|d| d.reflowable).unwrap_or(false)
+    }
+
+    /// How far through the document the top of the view is (0..1).
+    pub fn reading_fraction(&self) -> f32 {
+        match &self.doc {
+            Some(d) => (self.camera.offset[1] / d.layout.height.max(1.0)).clamp(0.0, 1.0),
+            None => 0.0,
+        }
     }
 
     pub fn is_dirty(&self) -> bool {

@@ -2,6 +2,7 @@
 
 pub mod actions;
 pub mod command;
+pub mod complete;
 pub mod keymap;
 pub mod keys;
 

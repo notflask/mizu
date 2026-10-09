@@ -2,8 +2,13 @@
 //! pressure (with the eraser end).
 //!
 //! - Wayland: `tablet-v2` and `pointer-gestures-v1` (this module's `wayland`).
-//! - Windows and macOS: pens already arrive as winit `Touch` events with
-//!   `force`, and macOS pinch as `PinchGesture`; `app.rs` handles those.
+//! - macOS: an `NSEvent` monitor for tablet events (`macos`); pinch comes
+//!   from winit as `PinchGesture`. `macos` also has the title bar helpers
+//!   and the handler for documents opened from Finder.
+//! - X11: XInput 2.4 pinch gestures and the tablet's pressure valuator
+//!   (`x11`).
+//! - Windows: pens arrive as winit `Touch` events with `force`; `windows`
+//!   adds which end of the pen touches (eraser).
 //!
 //! Backends degrade silently: if a protocol or API is missing, mizu keeps
 //! using the mouse events winit provides. Set `MIZU_NO_PLATFORM_INPUT=1` to
@@ -14,8 +19,14 @@ use std::sync::Arc;
 
 use winit::window::Window;
 
+#[cfg(target_os = "macos")]
+pub mod macos;
 #[cfg(all(unix, not(target_os = "macos")))]
 mod wayland;
+#[cfg(windows)]
+mod windows;
+#[cfg(all(unix, not(target_os = "macos")))]
+mod x11;
 
 /// Positions are in *logical* pixels (what the windowing system reports).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -43,6 +54,25 @@ pub enum PlatformEvent {
         pos: [f32; 2],
     },
     PenUp,
+    /// X11: pressure of the pen that is moving the mouse pointer (the
+    /// stroke itself comes through the normal mouse events).
+    PenPressure {
+        pressure: f32,
+        eraser: bool,
+    },
+}
+
+/// Windows: the pen touching the screen uses its eraser end. Read when a
+/// pen `Touch` starts (always false elsewhere).
+pub fn pen_eraser_active() -> bool {
+    #[cfg(windows)]
+    {
+        windows::eraser_active()
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
 }
 
 /// Callback a backend uses to hand events to the app (thread safe).
@@ -69,6 +99,16 @@ pub fn init(window: &Window, emit: Emit) -> Option<Platform> {
     let mut backends: Vec<Box<dyn Any>> = Vec::new();
     #[cfg(all(unix, not(target_os = "macos")))]
     if let Some(b) = wayland::init(window, emit.clone()) {
+        backends.push(b);
+    } else if let Some(b) = x11::init(window, emit.clone()) {
+        backends.push(b);
+    }
+    #[cfg(windows)]
+    if let Some(b) = windows::init(window, emit.clone()) {
+        backends.push(b);
+    }
+    #[cfg(target_os = "macos")]
+    if let Some(b) = macos::init(window, emit.clone()) {
         backends.push(b);
     }
     let _ = (window, &emit);

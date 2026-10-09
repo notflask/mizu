@@ -41,6 +41,45 @@ jobs:
           name: linux
           path: "*.tar.gz"
 
+  appimage:
+    # The oldest supported LTS, for glibc compatibility.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libclang-dev clang pkg-config libfontconfig1-dev libfreetype6-dev \
+            libwayland-dev libxkbcommon-dev libx11-dev libxcursor-dev libxi-dev libxrandr-dev \
+            libfuse2 file
+      - run: cargo build --release --locked
+      - name: AppImage
+        run: |
+          v=${GITHUB_REF_NAME:-dev}
+          curl -fsSLo linuxdeploy https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          chmod +x linuxdeploy
+          id=io.github.notflask.Mizu
+          mkdir -p AppDir/usr/share/icons
+          cp -r assets/icons/generated/linux/hicolor AppDir/usr/share/icons/
+          install -Dm644 packaging/linux/$id.metainfo.xml AppDir/usr/share/metainfo/$id.appdata.xml
+          # Vulkan, Wayland, xkbcommon and GL come from the host, never from the image.
+          export NO_STRIP=1
+          ./linuxdeploy --appdir AppDir \
+            --executable target/release/mizu \
+            --desktop-file packaging/linux/$id.desktop \
+            --icon-file assets/icons/generated/linux/hicolor/256x256/apps/$id.png \
+            --exclude-library 'libvulkan*' --exclude-library 'libwayland-*' \
+            --exclude-library 'libxkbcommon*' --exclude-library 'libGL*' --exclude-library 'libEGL*' \
+            --output appimage
+          mv mizu*.AppImage mizu-$v-linux-x86_64.AppImage
+      - uses: actions/upload-artifact@v4
+        with:
+          name: appimage
+          path: "*.AppImage"
+
   windows:
     runs-on: windows-latest
     steps:
@@ -59,10 +98,20 @@ jobs:
           New-Item -ItemType Directory $d | Out-Null
           Copy-Item target/release/mizu.exe, LICENSE, README.md $d
           Compress-Archive -Path $d -DestinationPath "$d.zip"
+      - name: MSI
+        shell: pwsh
+        run: |
+          choco install wixtoolset --version 3.14.1 -y --no-progress
+          $env:WIX = "C:\Program Files (x86)\WiX Toolset v3.14\"
+          cargo install cargo-wix --locked
+          $v = if ($env:GITHUB_REF_NAME) { $env:GITHUB_REF_NAME } else { "dev" }
+          cargo wix --no-build --nocapture -I packaging/windows/main.wxs --output "mizu-$v-windows-x86_64.msi"
       - uses: actions/upload-artifact@v4
         with:
           name: windows
-          path: "*.zip"
+          path: |
+            *.zip
+            *.msi
 
   macos:
     runs-on: macos-latest
@@ -79,11 +128,9 @@ jobs:
         run: |
           v=${GITHUB_REF_NAME:-dev}
           app=mizu.app
-          mkdir -p $app/Contents/MacOS $app/Contents/Resources
-          lipo -create -output $app/Contents/MacOS/mizu \
+          lipo -create -output mizu-universal \
             target/aarch64-apple-darwin/release/mizu target/x86_64-apple-darwin/release/mizu
-          sed "s/@VERSION@/${v#v}/g" packaging/macos/Info.plist > $app/Contents/Info.plist
-          cp assets/icons/generated/macos/mizu.icns $app/Contents/Resources/mizu.icns
+          packaging/macos/make-app.sh mizu-universal "$v" $app
           # Notarise when the Apple secrets exist, otherwise sign ad hoc.
           if [ -n "${{ secrets.APPLE_CERT_P12 }}" ]; then
             echo "${{ secrets.APPLE_CERT_P12 }}" | base64 --decode > cert.p12
@@ -109,7 +156,7 @@ jobs:
           path: "*.dmg"
 
   publish:
-    needs: [linux, windows, macos]
+    needs: [linux, appimage, windows, macos]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:

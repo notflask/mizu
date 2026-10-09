@@ -13,6 +13,8 @@ pub struct Gpu {
     pub queue: wgpu::Queue,
     pub surface: wgpu::Surface<'static>,
     pub config: wgpu::SurfaceConfiguration,
+    /// The pipeline cache and the file it is kept in (Vulkan only).
+    pub pipeline_cache: Option<PipelineCacheFile>,
     // The window must outlive the surface, so it is declared last.
     pub window: Arc<Window>,
 }
@@ -74,11 +76,19 @@ impl Gpu {
             );
         }
 
+        // Vulkan: keep compiled pipelines between runs (faster start-up).
+        let cache_features = adapter.features() & wgpu::Features::PIPELINE_CACHE;
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             label: Some("mizu"),
+            required_features: cache_features,
             ..Default::default()
         }))
         .context("cannot create the GPU device")?;
+        let pipeline_cache = if cache_features.is_empty() {
+            None
+        } else {
+            load_pipeline_cache(&device, &info)
+        };
         device.on_uncaptured_error(Arc::new(|e| log::error!("wgpu: {e}")));
 
         let caps = surface.get_capabilities(&adapter);
@@ -128,6 +138,7 @@ impl Gpu {
             queue,
             surface,
             config,
+            pipeline_cache,
             window,
         })
     }
@@ -182,4 +193,65 @@ impl Gpu {
     pub fn reconfigure(&mut self) {
         self.surface.configure(&self.device, &self.config);
     }
+}
+
+pub struct PipelineCacheFile {
+    pub cache: wgpu::PipelineCache,
+    path: std::path::PathBuf,
+    loaded_len: usize,
+}
+
+impl PipelineCacheFile {
+    /// Write the cache if it grew since it was loaded. On a thread: start-up
+    /// must not wait for the disk.
+    pub fn save(&self) {
+        let Some(data) = self.cache.get_data() else {
+            return;
+        };
+        if data.len() == self.loaded_len {
+            return;
+        }
+        let path = self.path.clone();
+        let _ = std::thread::Builder::new()
+            .name("mizu-pipeline-cache".into())
+            .spawn(move || {
+                let write = || -> std::io::Result<()> {
+                    let dir = path.parent().unwrap_or_else(|| std::path::Path::new("."));
+                    std::fs::create_dir_all(dir)?;
+                    let mut tmp = tempfile::NamedTempFile::new_in(dir)?;
+                    std::io::Write::write_all(&mut tmp, &data)?;
+                    tmp.persist(&path).map_err(|e| e.error)?;
+                    Ok(())
+                };
+                if let Err(e) = write() {
+                    log::debug!("cannot write the pipeline cache: {e}");
+                }
+            });
+    }
+}
+
+fn load_pipeline_cache(
+    device: &wgpu::Device,
+    info: &wgpu::AdapterInfo,
+) -> Option<PipelineCacheFile> {
+    let key = wgpu::util::pipeline_cache_key(info)?;
+    let path = crate::config::project_dirs()?.cache_dir().join(key);
+    let data = std::fs::read(&path).ok();
+    let loaded_len = data.as_ref().map(|d| d.len()).unwrap_or(0);
+    // SAFETY: the data was written by `PipelineCacheFile::save` from
+    // `get_data`; with `fallback` wgpu validates its header and starts empty
+    // when it does not match this driver.
+    let cache = unsafe {
+        device.create_pipeline_cache(&wgpu::PipelineCacheDescriptor {
+            label: Some("mizu"),
+            data: data.as_deref(),
+            fallback: true,
+        })
+    };
+    log::debug!("pipeline cache {} ({} bytes)", path.display(), loaded_len);
+    Some(PipelineCacheFile {
+        cache,
+        path,
+        loaded_len,
+    })
 }

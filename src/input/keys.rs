@@ -2,7 +2,7 @@
 
 use std::fmt;
 
-use winit::keyboard::{Key as WKey, ModifiersState, NamedKey};
+use winit::keyboard::{Key as WKey, KeyCode as WCode, ModifiersState, NamedKey, PhysicalKey};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum KeyCode {
@@ -129,6 +129,83 @@ impl Key {
         // Shift+Tab arrives as its own logical key on some layouts; keep it simple.
         Some(Key::new(code, m))
     }
+
+    /// Like `from_winit`, but aware of keyboard layouts.
+    ///
+    /// `unmodified` is the key without modifiers (winit's
+    /// `key_without_modifiers`). When Option (macOS) or AltGr produced the
+    /// character (`[` is Option+5 on a German Mac), `alt` is dropped so the
+    /// key matches a plain `[` binding. `<A-x>` stays `<A-x>`.
+    pub fn from_winit_layout(key: &WKey, unmodified: &WKey, mods: ModifiersState) -> Option<Key> {
+        let mut k = Key::from_winit(key, mods)?;
+        if let (KeyCode::Char(c), WKey::Character(u)) = (k.code, unmodified) {
+            if k.mods.alt && !k.mods.ctrl && produced_by_modifier(c, u) {
+                k.mods.alt = false;
+            }
+        }
+        Some(k)
+    }
+
+    /// For non-Latin layouts: the Latin letter or digit printed on the same
+    /// physical key of a US keyboard (`ш` -> `i` on a Ukrainian layout).
+    /// `None` when the key already is ASCII or has no Latin counterpart.
+    pub fn latin_fallback(&self, physical: &PhysicalKey) -> Option<Key> {
+        let KeyCode::Char(c) = self.code else {
+            return None;
+        };
+        if c.is_ascii() {
+            return None;
+        }
+        let PhysicalKey::Code(code) = physical else {
+            return None;
+        };
+        let latin = latin_for(*code, self.mods.shift || c.is_uppercase())?;
+        Some(Key::new(KeyCode::Char(latin), self.mods))
+    }
+}
+
+/// True when the character differs from what the key gives without
+/// modifiers, i.e. Option / AltGr changed it.
+fn produced_by_modifier(c: char, unmodified: &str) -> bool {
+    let mut it = unmodified.chars();
+    match (it.next(), it.next()) {
+        (Some(u), None) => !u.to_lowercase().eq(c.to_lowercase()),
+        _ => true,
+    }
+}
+
+fn latin_for(code: WCode, upper: bool) -> Option<char> {
+    use WCode::*;
+    let c = match code {
+        KeyA => 'a',
+        KeyB => 'b',
+        KeyC => 'c',
+        KeyD => 'd',
+        KeyE => 'e',
+        KeyF => 'f',
+        KeyG => 'g',
+        KeyH => 'h',
+        KeyI => 'i',
+        KeyJ => 'j',
+        KeyK => 'k',
+        KeyL => 'l',
+        KeyM => 'm',
+        KeyN => 'n',
+        KeyO => 'o',
+        KeyP => 'p',
+        KeyQ => 'q',
+        KeyR => 'r',
+        KeyS => 's',
+        KeyT => 't',
+        KeyU => 'u',
+        KeyV => 'v',
+        KeyW => 'w',
+        KeyX => 'x',
+        KeyY => 'y',
+        KeyZ => 'z',
+        _ => return None,
+    };
+    Some(if upper { c.to_ascii_uppercase() } else { c })
 }
 
 impl fmt::Display for Key {
@@ -325,5 +402,55 @@ mod tests {
             },
         );
         assert_eq!(k, Key::ch('G'));
+    }
+
+    #[test]
+    fn option_produced_chars_drop_alt() {
+        let alt = ModifiersState::ALT;
+        // German Mac: Option+5 gives "[".
+        let k = Key::from_winit_layout(
+            &WKey::Character("[".into()),
+            &WKey::Character("5".into()),
+            alt,
+        );
+        assert_eq!(k, Some(Key::ch('[')));
+        // A real <A-x> stays.
+        let k = Key::from_winit_layout(
+            &WKey::Character("x".into()),
+            &WKey::Character("x".into()),
+            alt,
+        )
+        .unwrap();
+        assert!(k.mods.alt);
+        // Ctrl+Alt is never treated as AltGr.
+        let k = Key::from_winit_layout(
+            &WKey::Character("@".into()),
+            &WKey::Character("q".into()),
+            alt | ModifiersState::CONTROL,
+        )
+        .unwrap();
+        assert!(k.mods.alt && k.mods.ctrl);
+    }
+
+    #[test]
+    fn cyrillic_falls_back_to_latin() {
+        let k = Key::ch('ш');
+        assert_eq!(
+            k.latin_fallback(&PhysicalKey::Code(WCode::KeyI)),
+            Some(Key::ch('i'))
+        );
+        let k = Key::ch('П');
+        assert_eq!(
+            k.latin_fallback(&PhysicalKey::Code(WCode::KeyG)),
+            Some(Key::ch('G'))
+        );
+        assert_eq!(
+            Key::ch('j').latin_fallback(&PhysicalKey::Code(WCode::KeyJ)),
+            None
+        );
+        assert_eq!(
+            Key::ch('ш').latin_fallback(&PhysicalKey::Code(WCode::Digit1)),
+            None
+        );
     }
 }

@@ -25,6 +25,8 @@ pub enum UserEvent {
     /// A background thread has something for us.
     Wake,
     Platform(PlatformEvent),
+    /// A document opened from outside (Finder on macOS).
+    OpenFile(PathBuf),
 }
 
 pub struct Options {
@@ -51,6 +53,15 @@ pub struct App {
     pub exit_error: Option<String>,
     diag: Option<Diag>,
     presented_once: bool,
+    /// Last cursor set on the window; setting it is a compositor request.
+    cursor_icon: Option<CursorIcon>,
+    /// Dark mode the window chrome was last set up for.
+    chrome_dark: Option<bool>,
+    chrome_edited: bool,
+    /// Time of the last click in the title strip, for double-clicks.
+    title_click: Option<Instant>,
+    /// When the X11 backend last reported pen pressure.
+    pressure_at: Option<Instant>,
 }
 
 /// `--diag`: reads back some frames and logs what they contain.
@@ -220,6 +231,7 @@ impl App {
             let _ = p.send_event(UserEvent::Wake);
         });
         let mut viewer = Viewer::new(settings, warning, wake);
+        viewer.restore_prefs();
         viewer.show_stats = opts.stats;
         if let Some(f) = opts.file {
             viewer.open(f, LoadPurpose::Open { page: opts.page });
@@ -254,6 +266,11 @@ impl App {
             capture_enabled: script.is_some() || diag.is_some(),
             diag,
             presented_once: false,
+            cursor_icon: None,
+            chrome_dark: None,
+            chrome_edited: false,
+            title_click: None,
+            pressure_at: None,
             script,
             platform: None,
             pinch_pos: None,
@@ -276,6 +293,64 @@ impl App {
         r.resize(size.width, size.height);
         self.viewer
             .set_window([size.width, size.height], w.scale_factor() as f32);
+        let inset = title_strip_height(w) * w.scale_factor() as f32;
+        self.viewer.set_top_inset(inset);
+    }
+
+    /// macOS: the window chrome follows mizu's dark mode (traffic lights,
+    /// background while resizing) and shows unsaved ink in the close button.
+    fn sync_chrome(&mut self) {
+        let Some(w) = &self.window else { return };
+        let dark = self.viewer.dark;
+        if self.chrome_dark != Some(dark) {
+            self.chrome_dark = Some(dark);
+            #[cfg(target_os = "macos")]
+            {
+                use winit::window::Theme;
+                w.set_theme(Some(if dark { Theme::Dark } else { Theme::Light }));
+                let bg = if dark {
+                    self.viewer.theme.dark_bg
+                } else {
+                    [255, 255, 255]
+                };
+                platform::macos::set_window_background(w, bg);
+            }
+        }
+        let edited = self.viewer.is_dirty();
+        if self.chrome_edited != edited {
+            self.chrome_edited = edited;
+            #[cfg(target_os = "macos")]
+            {
+                use winit::platform::macos::WindowExtMacOS;
+                w.set_document_edited(edited);
+            }
+        }
+        let _ = w;
+    }
+
+    /// A left click in the title strip: move the window, or what a
+    /// double-click on a title bar does.
+    fn title_strip_click(&mut self) -> bool {
+        let Some(w) = &self.window else { return false };
+        if self.viewer.camera.top_inset <= 0.0
+            || self.viewer.mouse.pos[1] >= self.viewer.camera.top_inset
+            || self.viewer.mode == UiMode::Outline
+        {
+            return false;
+        }
+        let now = Instant::now();
+        let double = self
+            .title_click
+            .is_some_and(|t| now.duration_since(t) < Duration::from_millis(400));
+        if double {
+            self.title_click = None;
+            #[cfg(target_os = "macos")]
+            platform::macos::title_double_click(w);
+        } else {
+            self.title_click = Some(now);
+            let _ = w.drag_window();
+        }
+        true
     }
 
     fn handle_platform(&mut self, ev: PlatformEvent) {
@@ -325,6 +400,10 @@ impl App {
                 } else {
                     self.viewer.on_mouse_button(Button::Left, false);
                 }
+            }
+            PlatformEvent::PenPressure { pressure, eraser } => {
+                self.viewer.pressure_hint = Some((pressure, eraser));
+                self.pressure_at = Some(Instant::now());
             }
         }
         self.viewer.dirty = true;
@@ -447,7 +526,10 @@ impl ApplicationHandler<UserEvent> for App {
         }
         let mut attrs = Window::default_attributes()
             .with_title(self.viewer.title())
-            .with_inner_size(LogicalSize::new(1100.0, 820.0))
+            .with_inner_size(match self.viewer.session.window {
+                Some([w, h]) if w >= 320.0 && h >= 240.0 => LogicalSize::new(w as f64, h as f64),
+                _ => LogicalSize::new(1100.0, 820.0),
+            })
             .with_min_inner_size(LogicalSize::new(320.0, 240.0));
         #[cfg(all(unix, not(target_os = "macos")))]
         {
@@ -455,6 +537,15 @@ impl ApplicationHandler<UserEvent> for App {
             use winit::platform::x11::WindowAttributesExtX11;
             attrs = WindowAttributesExtWayland::with_name(attrs, crate::config::APP_ID, "mizu");
             attrs = WindowAttributesExtX11::with_name(attrs, "mizu", crate::config::APP_ID);
+        }
+        #[cfg(target_os = "macos")]
+        {
+            // Content runs up to the top edge; mizu draws the title strip.
+            use winit::platform::macos::WindowAttributesExtMacOS;
+            attrs = attrs
+                .with_titlebar_transparent(true)
+                .with_title_hidden(true)
+                .with_fullsize_content_view(true);
         }
         if let Some(icon) = crate::icon::window_icon() {
             attrs = attrs.with_window_icon(Some(icon));
@@ -505,6 +596,7 @@ impl ApplicationHandler<UserEvent> for App {
         match event {
             UserEvent::Wake => self.viewer.dirty = true,
             UserEvent::Platform(ev) => self.handle_platform(ev),
+            UserEvent::OpenFile(p) => self.viewer.open_from_outside(p),
         }
         self.redraw();
     }
@@ -543,13 +635,33 @@ impl ApplicationHandler<UserEvent> for App {
             WindowEvent::ModifiersChanged(m) => self.mods = m.state(),
             WindowEvent::KeyboardInput { event, .. } => {
                 if event.state == ElementState::Pressed {
-                    if let Some(key) = Key::from_winit(&event.logical_key, self.mods) {
-                        self.viewer.on_key(key);
+                    use winit::platform::modifier_supplement::KeyEventExtModifierSupplement;
+                    let unmodified = event.key_without_modifiers();
+                    log::debug!(
+                        "key {:?} (unmodified {:?}, physical {:?}, mods {:?})",
+                        event.logical_key,
+                        unmodified,
+                        event.physical_key,
+                        self.mods
+                    );
+                    if let Some(key) =
+                        Key::from_winit_layout(&event.logical_key, &unmodified, self.mods)
+                    {
+                        let latin = key.latin_fallback(&event.physical_key);
+                        self.viewer.on_key_layout(key, latin);
                         self.redraw();
                     }
                 }
             }
             WindowEvent::CursorMoved { position, .. } => {
+                // Pressure belongs to a pen; a mouse moving later has none.
+                if self
+                    .pressure_at
+                    .is_some_and(|t| t.elapsed() > Duration::from_millis(80))
+                {
+                    self.pressure_at = None;
+                    self.viewer.pressure_hint = None;
+                }
                 self.viewer
                     .on_cursor_moved([position.x as f32, position.y as f32]);
                 self.redraw();
@@ -565,9 +677,12 @@ impl ApplicationHandler<UserEvent> for App {
                     MouseButton::Right => Some(Button::Right),
                     _ => None,
                 };
+                let pressed = state == ElementState::Pressed;
+                if b == Some(Button::Left) && pressed && self.title_strip_click() {
+                    return;
+                }
                 if let Some(b) = b {
-                    self.viewer
-                        .on_mouse_button(b, state == ElementState::Pressed);
+                    self.viewer.on_mouse_button(b, pressed);
                     self.redraw();
                 }
             }
@@ -598,7 +713,8 @@ impl ApplicationHandler<UserEvent> for App {
                             self.viewer.mouse.pos = pos;
                             self.viewer.mouse.inside = true;
                             if self.viewer.mode == UiMode::Draw {
-                                let erase = self.viewer.tool == crate::viewer::Tool::Eraser;
+                                let erase = self.viewer.tool == crate::viewer::Tool::Eraser
+                                    || platform::pen_eraser_active();
                                 self.viewer.pen_down(pos, pressure, erase);
                             } else {
                                 self.viewer.on_mouse_button(Button::Left, true);
@@ -670,6 +786,12 @@ impl ApplicationHandler<UserEvent> for App {
     }
 
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        if let Some(w) = &self.window {
+            let size = w.inner_size().to_logical::<f32>(w.scale_factor());
+            if w.fullscreen().is_none() && !w.is_maximized() {
+                self.viewer.session.window = Some([size.width, size.height]);
+            }
+        }
         self.viewer.save_session();
     }
 }
@@ -690,7 +812,10 @@ impl App {
             renderer.clear_cache();
             self.cache_epoch = v.cache_epoch;
         }
-        let more = v.upload_staged(renderer, 8);
+        // Fewer uploads per frame while the view moves, so a burst of
+        // finished tiles at the start of a scroll cannot cost a frame.
+        let budget = if v.is_animating() { 4 } else { 8 };
+        let more = v.upload_staged(renderer, budget);
         let tick = v.tick(now);
         let zoom_wake = v.schedule_tiles(renderer, now);
         v.refresh_highlights();
@@ -768,7 +893,10 @@ impl App {
         }
         let ms = t0.elapsed().as_secs_f32() * 1000.0;
         self.stats.push(now, ms);
-        log::trace!("frame {ms:.2}ms {fs:?}");
+        log::trace!(
+            "frame {ms:.2}ms offset {:?} {fs:?}",
+            self.viewer.camera.offset
+        );
         let retry = self.retry_after(&fs, now);
         self.finish_frame(
             event_loop,
@@ -805,6 +933,7 @@ impl App {
         wake: Option<Instant>,
         zoom_wake: Option<Instant>,
     ) {
+        self.sync_chrome();
         let title = self.viewer.title();
         if title != self.title {
             window.set_title(&title);
@@ -819,7 +948,10 @@ impl App {
         } else {
             CursorIcon::Default
         };
-        window.set_cursor(icon);
+        if self.cursor_icon != Some(icon) {
+            window.set_cursor(icon);
+            self.cursor_icon = Some(icon);
+        }
 
         if more_uploads || animating || self.viewer.dirty {
             window.request_redraw();
@@ -837,5 +969,26 @@ impl App {
         if self.viewer.quit {
             event_loop.exit();
         }
+    }
+}
+
+/// Height of the strip under a transparent title bar, in logical pixels:
+/// the real title bar on macOS (0 in full screen), elsewhere 0 unless
+/// `MIZU_TITLEBAR_INSET` asks for one (for testing the strip).
+fn title_strip_height(window: &Window) -> f32 {
+    if let Some(v) = std::env::var("MIZU_TITLEBAR_INSET")
+        .ok()
+        .and_then(|v| v.parse::<f32>().ok())
+    {
+        return v.max(0.0);
+    }
+    #[cfg(target_os = "macos")]
+    {
+        platform::macos::titlebar_height(window)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = window;
+        0.0
     }
 }

@@ -64,7 +64,7 @@ einen Coding-Agenten bzw. Entwickler, der das Projekt Meilenstein für Meilenste
 
 Diese Features werden **nicht** gebaut: Textauswahl und Kopieren, Text-Highlight-Annotationen,
 Textnotizen, Formen, Doppelseitenansicht, Tabs, Präsentationsmodus, Formulare ausfüllen,
-Drucken, eingebauter Dateidialog, Thumbnails-Seitenleiste, Plugin-System, EPUB und andere Formate.
+Drucken, eingebauter Dateidialog, Thumbnails-Seitenleiste, Plugin-System, andere Formate außer PDF und EPUB. (EPUB ist seit `docs/PLAN-2.md` ein Ziel.)
 
 ---
 
