@@ -41,6 +41,25 @@ Measured numbers (software renderer on a small cloud VM, so only the CPU side is
 | CPU use while idle | 0 (no timers, no polling) |
 | release binary | 16 MB; 19.1 MB with EPUB support (2026-10-09) |
 
+## Plan 2 (2026-10-09, headless Sway + lavapipe, and Xvfb)
+
+Checked with `MIZU_TEST_SCRIPT` screenshots: palette colours change the ink in light mode
+(`i`, `2`, draw, `3`, draw: red then blue strokes), the palette strip and the suggestion list of the
+command line, the help overlay, EPUB books in light and dark mode and after `:fontsize`, drawing
+refused in EPUBs, and the title strip (simulated with `MIZU_TITLEBAR_INSET=28`) in both themes.
+Under Xvfb the X11 backend starts (`x11: 0 tablet tool(s), gestures yes`).
+
+The macOS and Windows platform code (`src/platform/macos.rs`, `src/platform/windows.rs`, and the
+macOS calls in `app.rs` / `main.rs`) is type-checked and linted for `aarch64-apple-darwin` and
+`x86_64-pc-windows-msvc` in a small crate that includes those files; it has not run on a Mac or a
+Windows machine yet.
+
+| What | Result |
+| --- | --- |
+| first frame of a wheel notch after 1.5 s idle | moves 17 % of the notch (5.4 of 32.5 pt), then 8.3, 6.8, 4.7 … (before: 89 % in the first frame) |
+| frame time while scrolling (lavapipe, CPU only) | 3–8 ms |
+| release binary with EPUB | 19.1 MB (limit 30 MB) |
+
 ## Manual checklist on real hardware
 
 Not everything can be tested without a screen, a GPU and a pen. Please tick these off on each
@@ -58,6 +77,19 @@ something is black.
 - [ ] Pen: pressure changes the width; the eraser end of the pen erases.
 - [ ] Editing the PDF in another program (for example re-running LaTeX) reloads the page.
 - [ ] Quit protection: `:q` with unsaved ink refuses, `:q!` does not.
+- [ ] Scrolling right after the window was idle starts smoothly (no jump on the first frame), with
+      the wheel, held `j`, and the touchpad.
+- [ ] Your keyboard layout: `i`, digits `1`–`9` (colour changes, shown in the status line), `[` `]`
+      (width), also with a German (QWERTZ) and a Ukrainian layout active.
+- [ ] `:` shows suggestions; `Tab` completes and cycles; `→` takes the grey suggestion; `:e ~/`
+      lists files.
+- [ ] An EPUB opens, reads in light and dark mode, `/` search and `o` outline work, `:fontsize 14`
+      keeps the place.
+- [ ] `scripts/install.sh` installs, the app shows up in the launcher with its icon, a second run
+      upgrades, `--uninstall` removes it.
+- [ ] macOS: the title strip (light and dark), dragging and double-clicking it, full screen,
+      opening a PDF from Finder (mizu closed and open), pen pressure and the eraser end.
+- [ ] X11: touchpad pinch, pen pressure.
 
 | Platform | Compositor / driver | Result |
 | --- | --- | --- |
@@ -65,4 +97,4 @@ something is black.
 | Linux, Wayland | Hyprland | not tested yet |
 | Linux, X11 | | not tested yet |
 | Windows 11 | | compiles in CI, not run |
-| macOS | | compiles in CI, not run |
+| macOS | | compiles in CI, not run (title bar, Finder, pen are new) |

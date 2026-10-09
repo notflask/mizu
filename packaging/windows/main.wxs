@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="windows-1252"?>
+<!--
+  WiX 3 source for the Windows installer, built by cargo-wix in the
+  release workflow (see .github/workflows/release.yml).
+
+  It installs mizu.exe, adds a Start menu entry and registers mizu as an
+  "Open with" program for .pdf and .epub. It never changes the default app;
+  Windows asks the user. Uninstalling removes everything again.
+-->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <?if $(sys.BUILDARCH) = x64 or $(sys.BUILDARCH) = arm64 ?>
+    <?define PlatformProgramFilesFolder = "ProgramFiles64Folder" ?>
+  <?else ?>
+    <?define PlatformProgramFilesFolder = "ProgramFilesFolder" ?>
+  <?endif ?>
+
+  <Product
+      Id="*"
+      Name="mizu"
+      UpgradeCode="5B0B7E2C-3D7A-4C4B-9E61-2F4C1B9A6D10"
+      Manufacturer="notflask"
+      Language="1033"
+      Codepage="1252"
+      Version="$(var.Version)">
+
+    <Package
+        Id="*"
+        Keywords="Installer"
+        Description="mizu: a minimal PDF viewer with Vim keys, a dark mode for the page, and ink"
+        Manufacturer="notflask"
+        InstallerVersion="450"
+        Languages="1033"
+        Compressed="yes"
+        InstallScope="perMachine"
+        SummaryCodepage="1252" />
+
+    <MajorUpgrade
+        Schedule="afterInstallInitialize"
+        DowngradeErrorMessage="A newer version of mizu is already installed." />
+
+    <Media Id="1" Cabinet="media1.cab" EmbedCab="yes" />
+
+    <Icon Id="MizuIcon" SourceFile="assets\icons\generated\windows\mizu.ico" />
+    <Property Id="ARPPRODUCTICON" Value="MizuIcon" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/notflask/mizu" />
+
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="$(var.PlatformProgramFilesFolder)" Name="PFiles">
+        <Directory Id="APPLICATIONFOLDER" Name="mizu">
+          <Component Id="MainExecutable" Guid="*">
+            <File
+                Id="MizuExe"
+                Name="mizu.exe"
+                DiskId="1"
+                Source="$(var.CargoTargetBinDir)\mizu.exe"
+                KeyPath="yes" />
+          </Component>
+          <Component Id="License" Guid="*">
+            <File Id="LicenseFile" Name="LICENSE.txt" DiskId="1" Source="LICENSE" KeyPath="yes" />
+          </Component>
+
+          <!-- "Open with" for .pdf and .epub, without taking over the default. -->
+          <Component Id="FileAssociations" Guid="*">
+            <RegistryValue Root="HKLM" Key="Software\notflask\mizu" Name="InstallDir"
+                Type="string" Value="[APPLICATIONFOLDER]" KeyPath="yes" />
+
+            <RegistryValue Root="HKLM" Key="Software\Classes\mizu.Document"
+                Type="string" Value="Document (mizu)" />
+            <RegistryValue Root="HKLM" Key="Software\Classes\mizu.Document\DefaultIcon"
+                Type="string" Value="[APPLICATIONFOLDER]mizu.exe,0" />
+            <RegistryValue Root="HKLM" Key="Software\Classes\mizu.Document\shell\open\command"
+                Type="string" Value="&quot;[APPLICATIONFOLDER]mizu.exe&quot; &quot;%1&quot;" />
+
+            <RegistryValue Root="HKLM" Key="Software\Classes\.pdf\OpenWithProgids"
+                Name="mizu.Document" Type="string" Value="" />
+            <RegistryValue Root="HKLM" Key="Software\Classes\.epub\OpenWithProgids"
+                Name="mizu.Document" Type="string" Value="" />
+
+            <RegistryValue Root="HKLM" Key="Software\Classes\Applications\mizu.exe\shell\open\command"
+                Type="string" Value="&quot;[APPLICATIONFOLDER]mizu.exe&quot; &quot;%1&quot;" />
+            <RegistryValue Root="HKLM" Key="Software\Classes\Applications\mizu.exe\SupportedTypes"
+                Name=".pdf" Type="string" Value="" />
+            <RegistryValue Root="HKLM" Key="Software\Classes\Applications\mizu.exe\SupportedTypes"
+                Name=".epub" Type="string" Value="" />
+
+            <RegistryValue Root="HKLM" Key="Software\notflask\mizu\Capabilities"
+                Name="ApplicationName" Type="string" Value="mizu" />
+            <RegistryValue Root="HKLM" Key="Software\notflask\mizu\Capabilities"
+                Name="ApplicationDescription" Type="string"
+                Value="A minimal PDF viewer with Vim keys, a dark mode for the page, and ink" />
+            <RegistryValue Root="HKLM" Key="Software\notflask\mizu\Capabilities\FileAssociations"
+                Name=".pdf" Type="string" Value="mizu.Document" />
+            <RegistryValue Root="HKLM" Key="Software\notflask\mizu\Capabilities\FileAssociations"
+                Name=".epub" Type="string" Value="mizu.Document" />
+            <RegistryValue Root="HKLM" Key="Software\RegisteredApplications"
+                Name="mizu" Type="string" Value="Software\notflask\mizu\Capabilities" />
+          </Component>
+        </Directory>
+      </Directory>
+
+      <Directory Id="ProgramMenuFolder">
+        <Component Id="StartMenuShortcut" Guid="*">
+          <Shortcut Id="MizuShortcut" Name="mizu" Description="PDF and EPUB viewer"
+              Target="[APPLICATIONFOLDER]mizu.exe" WorkingDirectory="APPLICATIONFOLDER"
+              Icon="MizuIcon" />
+          <RegistryValue Root="HKCU" Key="Software\notflask\mizu" Name="StartMenuShortcut"
+              Type="integer" Value="1" KeyPath="yes" />
+        </Component>
+      </Directory>
+    </Directory>
+
+    <Feature Id="Complete" Title="mizu" Level="1" Absent="disallow">
+      <ComponentRef Id="MainExecutable" />
+      <ComponentRef Id="License" />
+      <ComponentRef Id="FileAssociations" />
+      <ComponentRef Id="StartMenuShortcut" />
+    </Feature>
+
+    <UIRef Id="WixUI_Minimal" />
+    <WixVariable Id="WixUILicenseRtf" Value="packaging\windows\License.rtf" />
+  </Product>
+</Wix>

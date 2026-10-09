@@ -98,10 +98,20 @@ jobs:
           New-Item -ItemType Directory $d | Out-Null
           Copy-Item target/release/mizu.exe, LICENSE, README.md $d
           Compress-Archive -Path $d -DestinationPath "$d.zip"
+      - name: MSI
+        shell: pwsh
+        run: |
+          choco install wixtoolset --version 3.14.1 -y --no-progress
+          $env:WIX = "C:\Program Files (x86)\WiX Toolset v3.14\"
+          cargo install cargo-wix --locked
+          $v = if ($env:GITHUB_REF_NAME) { $env:GITHUB_REF_NAME } else { "dev" }
+          cargo wix --no-build --nocapture -I packaging/windows/main.wxs --output "mizu-$v-windows-x86_64.msi"
       - uses: actions/upload-artifact@v4
         with:
           name: windows
-          path: "*.zip"
+          path: |
+            *.zip
+            *.msi
 
   macos:
     runs-on: macos-latest

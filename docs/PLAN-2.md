@@ -6,6 +6,10 @@ document wins** (for example, EPUB is no longer a non-goal).
 
 It is written for a coding agent (Claude Sonnet 5.5). Read it fully before you start.
 
+> **Status (2026-10-09):** M1–M8 are implemented on the `plan2` branch. What could not be
+> verified without the hardware is listed in `docs/TESTING.md` (macOS and Windows code is
+> type-checked but has not run; numbers on the user's own machines are still open).
+
 ---
 
 ## 0. Rules for the implementing agent

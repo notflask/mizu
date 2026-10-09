@@ -390,6 +390,7 @@ impl Renderer {
                 write_mask: wgpu::ColorWrites::ALL,
             })]
         };
+        let pipeline_cache = gpu.pipeline_cache.as_ref().map(|c| &c.cache);
         let make = |label: &str,
                     module: &wgpu::ShaderModule,
                     layout: &wgpu::PipelineLayout,
@@ -421,7 +422,7 @@ impl Renderer {
                     targets: &targets,
                 }),
                 multiview_mask: None,
-                cache: None,
+                cache: pipeline_cache,
             })
         };
 
@@ -472,6 +473,9 @@ impl Renderer {
         let overlay_buf = GrowBuf::new(device, "overlays", wgpu::BufferUsages::VERTEX, 16 * 1024);
         let live_buf = GrowBuf::new(device, "live-stroke", wgpu::BufferUsages::VERTEX, 16 * 1024);
 
+        if let Some(c) = &gpu.pipeline_cache {
+            c.save();
+        }
         Ok(Renderer {
             gpu,
             image_pipe,
