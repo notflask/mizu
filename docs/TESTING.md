@@ -15,7 +15,10 @@ on real hardware. Dates are when I last did it; "headless" means a compositor wi
   people's annotations stay untouched, failed saves keep the original, search, links, outline,
   tile rendering;
 - `tests/viewer.rs`: the viewer without a window: scrolling, zoom, marks, `:w` / `:q` rules,
-  external changes, search.
+  external changes, search, the command line (suggestions, Tab, editing, history), keyboard
+  layouts, palette colours, help and recent lists;
+- `tests/epub.rs`: a generated EPUB: layout and re-layout, outline, search, links, tiles, and the
+  read-only rules in the viewer.
 
 CI (`.github/workflows/ci.yml`) builds and tests on Linux, Windows and macOS.
 
@@ -36,7 +39,7 @@ Measured numbers (software renderer on a small cloud VM, so only the CPU side is
 | save 1000 strokes into a PDF | 125 ms |
 | hit-test the eraser against 10 000 strokes | 21 us |
 | CPU use while idle | 0 (no timers, no polling) |
-| release binary | 16 MB |
+| release binary | 16 MB; 19.1 MB with EPUB support (2026-10-09) |
 
 ## Manual checklist on real hardware
 

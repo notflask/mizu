@@ -5,7 +5,7 @@ fn main() {
         std::process::exit(2);
     };
     let t = std::time::Instant::now();
-    match mizu::doc::load(std::path::Path::new(&p), None) {
+    match mizu::doc::load(std::path::Path::new(&p), None, Default::default()) {
         Ok(i) => println!("ok {} pages in {:?}", i.pages.len(), t.elapsed()),
         Err(e) => println!("err {e} in {:?}", t.elapsed()),
     }

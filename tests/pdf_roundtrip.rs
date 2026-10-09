@@ -31,7 +31,7 @@ fn sample(dir: &std::path::Path) -> std::path::PathBuf {
 fn loads_metadata_outline_and_rotation() {
     let dir = tempfile::tempdir().unwrap();
     let path = sample(dir.path());
-    let info = doc::load(&path, None).unwrap();
+    let info = doc::load(&path, None, Default::default()).unwrap();
     assert_eq!(info.pages.len(), 3);
     assert_eq!((info.pages[0].w, info.pages[0].h), (400.0, 600.0));
     assert_eq!((info.pages[1].w, info.pages[1].h), (600.0, 400.0));
@@ -46,10 +46,13 @@ fn loads_metadata_outline_and_rotation() {
 #[test]
 fn missing_and_garbage_files_fail_cleanly() {
     let dir = tempfile::tempdir().unwrap();
-    assert!(doc::load(&dir.path().join("nope.pdf"), None).is_err());
+    assert!(doc::load(&dir.path().join("nope.pdf"), None, Default::default()).is_err());
     let junk = dir.path().join("junk.pdf");
     std::fs::write(&junk, b"definitely not a pdf").unwrap();
-    assert!(matches!(doc::load(&junk, None), Err(OpenError::Failed(_))));
+    assert!(matches!(
+        doc::load(&junk, None, Default::default()),
+        Err(OpenError::Failed(_))
+    ));
 }
 
 fn wait_for<T>(rx: &crossbeam_channel::Receiver<T>, secs: u64) -> T {
@@ -158,7 +161,7 @@ fn strokes_survive_save_and_load_including_rotated_pages() {
     ];
     annots::save_with_strokes(&path, &path, None, &strokes).unwrap();
 
-    let info = doc::load(&path, None).unwrap();
+    let info = doc::load(&path, None, Default::default()).unwrap();
     assert_eq!(info.strokes.len(), 4);
     for orig in &strokes {
         let got = info
@@ -182,13 +185,16 @@ fn strokes_survive_save_and_load_including_rotated_pages() {
 
     // Saving again with fewer strokes replaces the old ones (no duplicates).
     annots::save_with_strokes(&path, &path, None, &strokes[..1]).unwrap();
-    let info = doc::load(&path, None).unwrap();
+    let info = doc::load(&path, None, Default::default()).unwrap();
     assert_eq!(info.strokes.len(), 1);
     assert_eq!(info.strokes[0].id, strokes[0].id);
 
     // And an empty save removes everything.
     annots::save_with_strokes(&path, &path, None, &[]).unwrap();
-    assert!(doc::load(&path, None).unwrap().strokes.is_empty());
+    assert!(doc::load(&path, None, Default::default())
+        .unwrap()
+        .strokes
+        .is_empty());
 }
 
 #[test]
@@ -199,7 +205,13 @@ fn save_to_other_path_leaves_source_untouched() {
     let copy = dir.path().join("copy.pdf");
     annots::save_with_strokes(&path, &copy, None, &[pen(0, 100.0, false)]).unwrap();
     assert_eq!(std::fs::read(&path).unwrap(), before);
-    assert_eq!(doc::load(&copy, None).unwrap().strokes.len(), 1);
+    assert_eq!(
+        doc::load(&copy, None, Default::default())
+            .unwrap()
+            .strokes
+            .len(),
+        1
+    );
 }
 
 #[test]

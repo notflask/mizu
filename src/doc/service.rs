@@ -7,10 +7,9 @@ use std::sync::Arc;
 use std::thread::JoinHandle;
 
 use crossbeam_channel::{unbounded, Receiver, Sender};
-use mupdf::pdf::PdfDocument;
-use mupdf::{DestinationKind, TextPageFlags};
+use mupdf::{DestinationKind, Document, TextPageFlags};
 
-use super::open_pdf;
+use super::{open_document, OpenDoc, Reflow};
 use crate::ink::Stroke;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -79,13 +78,22 @@ impl Service {
         password: Option<String>,
         wake: Arc<dyn Fn() + Send + Sync>,
     ) -> Service {
+        Self::spawn_reflow(path, password, Reflow::default(), wake)
+    }
+
+    pub fn spawn_reflow(
+        path: PathBuf,
+        password: Option<String>,
+        reflow: Reflow,
+        wake: Arc<dyn Fn() + Send + Sync>,
+    ) -> Service {
         let (tx, jobs) = unbounded::<Job>();
         let (reply_tx, rx) = unbounded::<Reply>();
         let current_search = Arc::new(AtomicU64::new(0));
         let cs = current_search.clone();
         let handle = std::thread::Builder::new()
             .name("mizu-service".into())
-            .spawn(move || run(path, password, jobs, reply_tx, cs, wake))
+            .spawn(move || run(path, password, reflow, jobs, reply_tx, cs, wake))
             .ok();
         Service {
             tx,
@@ -121,15 +129,16 @@ impl Drop for Service {
 fn run(
     path: PathBuf,
     password: Option<String>,
+    reflow: Reflow,
     jobs: Receiver<Job>,
     out: Sender<Reply>,
     current_search: Arc<AtomicU64>,
     wake: Arc<dyn Fn() + Send + Sync>,
 ) {
-    let mut doc: Option<PdfDocument> = None;
-    let ensure = |doc: &mut Option<PdfDocument>| -> bool {
+    let mut doc: Option<OpenDoc> = None;
+    let ensure = |doc: &mut Option<OpenDoc>| -> bool {
         if doc.is_none() {
-            *doc = open_pdf(&path, password.as_deref()).ok();
+            *doc = open_document(&path, password.as_deref(), reflow).ok();
         }
         doc.is_some()
     };
@@ -151,7 +160,7 @@ fn run(
                     send(Reply::SearchDone { id });
                     continue;
                 }
-                let d = doc.as_ref().expect("document opened above");
+                let d = doc.as_ref().expect("document opened above").doc();
                 let n = d.page_count().unwrap_or(0).max(0) as usize;
                 for step in 0..n {
                     if current_search.load(Ordering::SeqCst) != id {
@@ -178,7 +187,7 @@ fn run(
                 if !ensure(&mut doc) {
                     continue;
                 }
-                let d = doc.as_ref().expect("document opened above");
+                let d = doc.as_ref().expect("document opened above").doc();
                 for p in pages {
                     let links = page_links(d, p);
                     send(Reply::Links { page: p, links });
@@ -191,7 +200,7 @@ fn run(
 /// Search one page. MuPDF's search ignores case; for case-sensitive queries
 /// the hits are filtered against the page text.
 pub fn search_page(
-    doc: &PdfDocument,
+    doc: &Document,
     page: usize,
     needle: &str,
     case_sensitive: bool,
@@ -269,7 +278,7 @@ pub fn filter_case(rects: Vec<[f32; 4]>, text: &str, needle: &str) -> Vec<[f32; 
     }
 }
 
-fn page_links(doc: &PdfDocument, page: usize) -> Vec<LinkInfo> {
+fn page_links(doc: &Document, page: usize) -> Vec<LinkInfo> {
     let Ok(p) = doc.load_page(page as i32) else {
         return Vec::new();
     };

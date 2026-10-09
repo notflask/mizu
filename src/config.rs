@@ -45,6 +45,14 @@ struct RawPen {
 
 #[derive(Debug, Deserialize, Default)]
 #[serde(default, deny_unknown_fields)]
+struct RawEpub {
+    page_width: Option<f32>,
+    page_height: Option<f32>,
+    font_size: Option<f32>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
 struct RawKeys {
     normal: BTreeMap<String, String>,
     draw: BTreeMap<String, String>,
@@ -60,6 +68,7 @@ struct RawConfig {
     tile_cache_mb: Option<u32>,
     dark: RawDark,
     pen: RawPen,
+    epub: RawEpub,
     keys: RawKeys,
 }
 
@@ -77,6 +86,8 @@ pub struct Settings {
     pub dark_separator: Option<[u8; 3]>,
     pub pen_width: f32,
     pub palette: Vec<[u8; 3]>,
+    /// Page size and text size EPUB books are laid out to (points).
+    pub reflow: crate::doc::Reflow,
     pub keys_normal: BTreeMap<String, String>,
     pub keys_draw: BTreeMap<String, String>,
 }
@@ -94,6 +105,7 @@ impl Default for Settings {
             dark_separator: None,
             pen_width: 1.5,
             palette: default_palette(),
+            reflow: crate::doc::Reflow::default(),
             keys_normal: BTreeMap::new(),
             keys_draw: BTreeMap::new(),
         }
@@ -174,6 +186,38 @@ impl Settings {
                 s.palette = parsed.into_iter().take(9).collect();
             }
         }
+        let mut size =
+            |name: &str, v: Option<f32>, range: std::ops::RangeInclusive<f32>, out: &mut f32| {
+                if let Some(v) = v {
+                    if v.is_finite() && range.contains(&v) {
+                        *out = v;
+                    } else {
+                        warn.push(format!(
+                            "epub.{name} must be between {} and {}",
+                            range.start(),
+                            range.end()
+                        ));
+                    }
+                }
+            };
+        size(
+            "page_width",
+            raw.epub.page_width,
+            100.0..=5000.0,
+            &mut s.reflow.w,
+        );
+        size(
+            "page_height",
+            raw.epub.page_height,
+            100.0..=5000.0,
+            &mut s.reflow.h,
+        );
+        size(
+            "font_size",
+            raw.epub.font_size,
+            4.0..=72.0,
+            &mut s.reflow.em,
+        );
         s.keys_normal = raw.keys.normal;
         s.keys_draw = raw.keys.draw;
         Ok((s, warn))

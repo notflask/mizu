@@ -11,6 +11,8 @@ A small PDF viewer I wrote for studying. It does four things and tries to do the
 - **Is driven from the keyboard** with Vim keys: `j`/`k`, `gg`/`G`, `/` search, marks, `:` commands.
 - **Lets you scribble on the PDF** with a pen, an eraser and undo/redo, and saves the ink *into* the PDF.
 
+It also reads **EPUB** books, with the same keys, dark mode, search and table of contents.
+
 No toolbar, no menus, no sidebar. A page and one line of status at the bottom, similar in spirit to
 zathura and sioyek.
 
@@ -93,7 +95,7 @@ Tagged releases carry a Linux tarball, an AppImage, a Windows zip and a macOS ap
 mizu [--page N] [--stats] [FILE]
 ```
 
-Drop a PDF onto the window or type `:e path/to/file.pdf`. Mizu remembers where you were in every
+Drop a PDF or EPUB onto the window or type `:e path/to/file.pdf`. Mizu remembers where you were in every
 file, and your marks, between runs.
 
 ### Keys
@@ -148,6 +150,7 @@ the platform reports it. A pen with pressure draws variable-width lines (see *St
 | `:color #rrggbb`, `:color red`, `:color 3` | pen colour: hex, a name, or a palette entry |
 | `:width 2`, `:width` | set the pen width (points), or show it |
 | `:recent` | recently opened files |
+| `:fontsize 14` | EPUB: lay the book out again with another text size |
 | `:help` | every key and command |
 
 Saving is explicit, like in Vim: nothing is written until you say `:w`.
@@ -184,6 +187,11 @@ foreground = "#ffffff"
 [pen]
 width = 1.5
 palette = ["#1a1a1a", "#e03131", "#1971c2", "#2f9e44", "#f08c00", "#9c36b5"]
+
+[epub]
+page_width = 480          # points; the virtual page books are laid out to
+page_height = 680
+font_size = 11
 
 [keys.normal]
 "<C-n>" = "toggle_dark"   # add or override a binding
@@ -233,6 +241,17 @@ from their in-memory copy), which is how they stay editable.
 
 **Idle means idle.** The event loop sleeps until something happens. When nothing changes, mizu draws
 zero frames and uses no CPU.
+
+## EPUB
+
+EPUB books are laid out by MuPDF to a virtual page (480 × 680 pt by default, see `[epub]` in
+the config) and then shown like any PDF page: tiles, zoom, dark mode, search, outline and links
+all work the same way. `:fontsize` lays the book out again and keeps your place; mizu also
+remembers the place per book. Books are **read-only**: drawing (`i`) and `:w` are PDF-only,
+because ink cannot be stored inside an EPUB and would drift whenever the text is laid out again.
+Fonts that a book does not embed come from MuPDF's built-in set and the system fonts.
+EPUB support (MuPDF's HTML engine) adds about 3 MB to the binary: the stripped Linux release build
+is 19.1 MB instead of 16 MB.
 
 ## Status
 

@@ -22,6 +22,12 @@ pub struct FileState {
     pub marks: BTreeMap<char, (usize, f32)>,
     /// Monotonic counter used to evict the least recently used entries.
     pub stamp: u64,
+    /// EPUB: the text size `page` / `y_in_page` belong to.
+    #[serde(default)]
+    pub font_size: Option<f32>,
+    /// Position as a fraction of the whole document, for a changed layout.
+    #[serde(default)]
+    pub fraction: Option<f32>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -34,6 +40,10 @@ pub struct Session {
     /// Inner window size in logical pixels.
     #[serde(default)]
     pub window: Option<[f32; 2]>,
+    /// Entries changed by this process; only these are written back, so two
+    /// windows do not overwrite each other's positions.
+    #[serde(skip)]
+    touched: std::collections::BTreeSet<String>,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
@@ -65,10 +75,23 @@ impl Session {
         self.files.get(&key_for(file))
     }
 
+    fn set_key(&mut self, key: String, mut state: FileState) {
+        self.counter += 1;
+        state.stamp = self.counter;
+        self.files.insert(key, state);
+        self.evict();
+    }
+
     pub fn set(&mut self, file: &Path, mut state: FileState) {
         self.counter += 1;
         state.stamp = self.counter;
-        self.files.insert(key_for(file), state);
+        let key = key_for(file);
+        self.touched.insert(key.clone());
+        self.files.insert(key, state);
+        self.evict();
+    }
+
+    fn evict(&mut self) {
         if self.files.len() > MAX_ENTRIES {
             let mut stamps: Vec<(u64, String)> = self
                 .files
@@ -113,8 +136,25 @@ impl Session {
     pub fn save_to(&self, path: &Path) -> std::io::Result<()> {
         let dir = path.parent().unwrap_or_else(|| Path::new("."));
         std::fs::create_dir_all(dir)?;
+        // Merge into what is on disk now: another window may have saved
+        // since this one loaded the file.
+        let mut merged: Session = std::fs::read_to_string(path)
+            .ok()
+            .and_then(|t| serde_json::from_str(&t).ok())
+            .unwrap_or_default();
+        for key in &self.touched {
+            if let Some(st) = self.files.get(key) {
+                merged.set_key(key.clone(), st.clone());
+            }
+        }
+        if self.pen.is_some() {
+            merged.pen = self.pen;
+        }
+        if self.window.is_some() {
+            merged.window = self.window;
+        }
         let mut tmp = tempfile::NamedTempFile::new_in(dir)?;
-        let json = serde_json::to_vec(self).map_err(std::io::Error::other)?;
+        let json = serde_json::to_vec(&merged).map_err(std::io::Error::other)?;
         tmp.write_all(&json)?;
         tmp.persist(path).map_err(|e| e.error)?;
         Ok(())
@@ -221,5 +261,25 @@ mod tests {
             .map(|(p, _)| p.file_name().unwrap().to_owned())
             .collect();
         assert_eq!(names, vec!["b.pdf", "a.pdf"]);
+    }
+
+    #[test]
+    fn saving_keeps_entries_of_other_windows() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("session.json");
+        let a = dir.path().join("a.pdf");
+        let b = dir.path().join("b.pdf");
+        std::fs::write(&a, b"x").unwrap();
+        std::fs::write(&b, b"x").unwrap();
+        // Two windows load the same (empty) session.
+        let mut one = Session::default();
+        let mut two = Session::default();
+        one.set(&a, st(4));
+        one.save_to(&path).unwrap();
+        two.set(&b, st(9));
+        two.save_to(&path).unwrap();
+        let disk: Session = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(disk.get(&a).unwrap().page, 4);
+        assert_eq!(disk.get(&b).unwrap().page, 9);
     }
 }

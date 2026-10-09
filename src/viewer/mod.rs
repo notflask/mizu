@@ -97,6 +97,8 @@ pub struct DocState {
     _watcher: Option<Watcher>,
     watcher_rx: Option<Receiver<()>>,
     pub tile_scale: f32,
+    /// EPUB: laid out by MuPDF, read-only.
+    pub reflowable: bool,
 }
 
 pub enum LoadPurpose {
@@ -104,6 +106,9 @@ pub enum LoadPurpose {
     Open { page: Option<usize> },
     /// Reload the same file, keeping the view.
     Reload,
+    /// The same book laid out again (new text size): keep the reading
+    /// position, given as a fraction of the whole document.
+    Relayout { fraction: f32 },
 }
 
 struct Loader {
@@ -170,6 +175,8 @@ pub struct Viewer {
     pub tool: Tool,
     pub pen_color: [u8; 3],
     pub pen_width: f32,
+    /// Layout of EPUB books (`:fontsize` changes the text size).
+    pub reflow: crate::doc::Reflow,
     pub pen: draw::PenState,
     pub mouse: MouseState,
     pub quit: bool,
@@ -223,6 +230,7 @@ impl Viewer {
                 .copied()
                 .unwrap_or([0x1a, 0x1a, 0x1a]),
             pen_width: settings.pen_width,
+            reflow: settings.reflow,
             dark: settings.dark_by_default,
             theme,
             keymaps,
@@ -355,10 +363,11 @@ impl Viewer {
         let (tx, rx) = unbounded();
         let wake = self.wake.clone();
         let p = path.clone();
+        let reflow = self.reflow;
         let spawned = std::thread::Builder::new()
             .name("mizu-load".into())
             .spawn(move || {
-                let _ = tx.send(doc::load(&p, password.as_deref()));
+                let _ = tx.send(doc::load(&p, password.as_deref(), reflow));
                 wake();
             });
         if spawned.is_err() {
@@ -419,18 +428,32 @@ impl Viewer {
             ink.push(s);
         }
         let wake = self.wake.clone();
-        let pool = Pool::spawn(
+        let pool = Pool::spawn_reflow(
             info.path.clone(),
             info.password.clone(),
+            self.reflow,
             wake.clone(),
             crate::doc::worker::worker_count(),
         );
-        let service = Service::spawn(info.path.clone(), info.password.clone(), wake.clone());
+        let service = Service::spawn_reflow(
+            info.path.clone(),
+            info.password.clone(),
+            self.reflow,
+            wake.clone(),
+        );
         let watcher = crate::watch::watch(&info.path, wake);
         let watcher_rx = watcher.as_ref().map(|w| w.rx.clone());
 
         // Carry navigation state across a reload.
+        let relayout = match purpose {
+            LoadPurpose::Relayout { fraction } => Some(fraction),
+            _ => None,
+        };
         let (marks, jumps, jump_idx, keep_view) = match (&purpose, self.doc.take()) {
+            (LoadPurpose::Relayout { .. }, Some(_)) => {
+                // Page numbers mean something else after a new layout.
+                (BTreeMap::new(), Vec::new(), 0, true)
+            }
             (LoadPurpose::Reload, Some(old)) => {
                 let cap = |p: Pos| Pos {
                     page: p.page.min(n.saturating_sub(1)),
@@ -475,6 +498,7 @@ impl Viewer {
             _watcher: watcher,
             watcher_rx,
             tile_scale: 1.0,
+            reflowable: info.reflowable,
         };
 
         if !keep_view {
@@ -508,14 +532,26 @@ impl Viewer {
             self.camera.apply_mode(&state.layout, 0);
             self.camera.offset = [0.0, 0.0];
             if let Some(s) = &saved {
-                if s.page < n {
-                    self.camera.offset = [s.x, state.layout.pages[s.page].y + s.y_in_page];
+                let same_layout = !info.reflowable || s.font_size == Some(self.reflow.em);
+                match (same_layout, s.fraction) {
+                    (false, Some(f)) => {
+                        self.camera.offset = [s.x, f * state.layout.height];
+                    }
+                    _ if s.page < n => {
+                        self.camera.offset = [s.x, state.layout.pages[s.page].y + s.y_in_page];
+                    }
+                    _ => {}
                 }
             }
             if let Some(p) = page_override {
                 let p = p.min(n.saturating_sub(1));
                 self.camera.offset[1] = state.layout.pages[p].y;
             }
+        } else if let Some(f) = relayout {
+            self.camera.offset[1] = f * state.layout.height;
+            let page = state.layout.page_at_y(self.camera.center_y());
+            self.camera.apply_mode(&state.layout, page);
+            self.camera.offset[1] = f * state.layout.height;
         } else {
             let page = state.layout.page_at_y(self.camera.center_y());
             self.camera.apply_mode(&state.layout, page);
@@ -537,7 +573,9 @@ impl Viewer {
             self.mode = UiMode::Normal;
         }
         self.doc = Some(state);
-        if keep_view {
+        if relayout.is_some() {
+            self.info(format!("{} pages at {}pt", n, self.reflow.em));
+        } else if keep_view {
             self.info("reloaded");
         }
         self.dirty = true;
@@ -560,11 +598,12 @@ impl Viewer {
             dark: Some(self.dark),
             marks: d.marks.iter().map(|(c, p)| (*c, (p.page, p.y))).collect(),
             stamp: 0,
+            font_size: d.reflowable.then_some(self.reflow.em),
+            fraction: Some(self.camera.offset[1] / d.layout.height.max(1.0)),
         };
         self.session.set(&d.path, st);
     }
 
-    /// Persist the session (call when quitting or switching files).
     /// Restore the pen settings of the last run (the app calls this; tests
     /// start from the config defaults).
     pub fn restore_prefs(&mut self) {
@@ -582,6 +621,7 @@ impl Viewer {
         });
     }
 
+    /// Persist the session (call when quitting or switching files).
     pub fn save_session(&mut self) {
         self.remember_prefs();
         if let Some(d) = self.doc.take() {
@@ -846,6 +886,18 @@ impl Viewer {
 
     pub fn path(&self) -> Option<&Path> {
         self.doc.as_ref().map(|d| d.path.as_path())
+    }
+
+    pub fn is_reflowable(&self) -> bool {
+        self.doc.as_ref().map(|d| d.reflowable).unwrap_or(false)
+    }
+
+    /// How far through the document the top of the view is (0..1).
+    pub fn reading_fraction(&self) -> f32 {
+        match &self.doc {
+            Some(d) => (self.camera.offset[1] / d.layout.height.max(1.0)).clamp(0.0, 1.0),
+            None => 0.0,
+        }
     }
 
     pub fn is_dirty(&self) -> bool {

@@ -13,11 +13,11 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
 
 use crossbeam_channel::{unbounded, Receiver, Sender};
-use mupdf::pdf::{PdfDocument, PdfPage};
+use mupdf::pdf::PdfPage;
 use mupdf::{Colorspace, Device, DisplayList, Matrix, Pixmap, Rect};
 
 use super::annots;
-use super::open_pdf;
+use super::{open_document, OpenDoc, Reflow};
 
 /// Edge length of a tile slot in pixels.
 pub const TILE: u32 = 512;
@@ -100,6 +100,18 @@ impl Pool {
         wake: Arc<dyn Fn() + Send + Sync>,
         workers: usize,
     ) -> Pool {
+        Self::spawn_reflow(path, password, Reflow::default(), wake, workers)
+    }
+
+    /// Like `spawn`; EPUBs are laid out with `reflow` (every worker has to
+    /// use the same layout).
+    pub fn spawn_reflow(
+        path: PathBuf,
+        password: Option<String>,
+        reflow: Reflow,
+        wake: Arc<dyn Fn() + Send + Sync>,
+        workers: usize,
+    ) -> Pool {
         let shared = Arc::new(Shared {
             q: Mutex::new(Queues::default()),
             cv: Condvar::new(),
@@ -116,6 +128,7 @@ impl Pool {
                     wake: wake.clone(),
                     path: path.clone(),
                     password: password.clone(),
+                    reflow,
                 };
                 std::thread::Builder::new()
                     .name(format!("mizu-render-{i}"))
@@ -177,6 +190,7 @@ struct WorkerCtx {
     wake: Arc<dyn Fn() + Send + Sync>,
     path: PathBuf,
     password: Option<String>,
+    reflow: Reflow,
 }
 
 enum Job {
@@ -240,7 +254,7 @@ impl WorkerCtx {
     }
 
     fn run(self) {
-        let doc = match open_pdf(&self.path, self.password.as_deref()) {
+        let doc = match open_document(&self.path, self.password.as_deref(), self.reflow) {
             Ok(d) => d,
             Err(e) => {
                 self.send(Rendered::OpenFailed(e.to_string()));
@@ -324,13 +338,21 @@ impl WorkerCtx {
     }
 }
 
-fn build_page(doc: &PdfDocument, index: usize) -> Result<CachedPage, String> {
-    let page = doc.load_page(index as i32).map_err(|e| e.to_string())?;
-    let mut page = PdfPage::try_from(page).map_err(|e| e.to_string())?;
-    // mizu strokes are drawn by the GPU layer, never by MuPDF.
-    annots::remove_mizu(&mut page).map_err(|e| e.to_string())?;
-    let b = page.bounds().map_err(|e| e.to_string())?;
-    let list = page.to_display_list(true).map_err(|e| e.to_string())?;
+fn build_page(doc: &OpenDoc, index: usize) -> Result<CachedPage, String> {
+    let page = doc
+        .doc()
+        .load_page(index as i32)
+        .map_err(|e| e.to_string())?;
+    let (b, list) = if doc.is_pdf() {
+        let mut page = PdfPage::try_from(page).map_err(|e| e.to_string())?;
+        // mizu strokes are drawn by the GPU layer, never by MuPDF.
+        annots::remove_mizu(&mut page).map_err(|e| e.to_string())?;
+        let b = page.bounds().map_err(|e| e.to_string())?;
+        (b, page.to_display_list(true).map_err(|e| e.to_string())?)
+    } else {
+        let b = page.bounds().map_err(|e| e.to_string())?;
+        (b, page.to_display_list(true).map_err(|e| e.to_string())?)
+    };
     Ok(CachedPage {
         list,
         x0: b.x0,

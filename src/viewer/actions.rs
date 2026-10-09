@@ -119,7 +119,9 @@ impl Viewer {
                 self.set_dark(on);
             }
             EnterDraw => {
-                if self.doc.is_some() {
+                if self.is_reflowable() {
+                    self.error("Drawing works only in PDFs");
+                } else if self.doc.is_some() {
                     self.mode = UiMode::Draw;
                     self.dirty = true;
                 } else {
@@ -509,9 +511,23 @@ impl Viewer {
         }
     }
 
+    /// `:fontsize`: lay the book out again with another text size, keeping
+    /// the reading position.
     pub fn set_font_size(&mut self, pt: f32) {
-        let _ = pt;
-        self.error("E: :fontsize only works in EPUB books");
+        if !self.is_reflowable() {
+            self.error("E: :fontsize only works in EPUB books");
+            return;
+        }
+        if !(4.0..=72.0).contains(&pt) {
+            self.error("E474: Invalid argument: font size must be between 4 and 72");
+            return;
+        }
+        self.reflow.em = pt;
+        let fraction = self.reading_fraction();
+        if let Some(path) = self.path().map(|p| p.to_path_buf()) {
+            self.start_load(path, Option::None, LoadPurpose::Relayout { fraction });
+            self.info(format!("Laying out at {pt}pt…"));
+        }
     }
 
     pub fn outline_jump(&mut self) {
@@ -565,6 +581,7 @@ impl Viewer {
                     self.quit_now();
                 }
             }
+            Command::WriteQuit if self.is_reflowable() => self.quit_now(),
             Command::WriteQuit => match self.path().map(|p| p.to_path_buf()) {
                 Some(p) => self.start_save(p, true),
                 Option::None => self.quit_now(),
@@ -647,6 +664,10 @@ impl Viewer {
     }
 
     pub fn start_save(&mut self, dst: PathBuf, quit_after: bool) {
+        if self.is_reflowable() {
+            self.error("E: EPUB files are read-only");
+            return;
+        }
         let Some(d) = &mut self.doc else {
             self.error("No file open");
             return;
