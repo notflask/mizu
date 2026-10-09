@@ -37,6 +37,7 @@ pub enum Action {
     // misc
     Outline,
     Help,
+    ToggleSpread,
     ToggleDark,
     EnterDraw,
     ExitDraw,
@@ -101,6 +102,7 @@ impl Action {
             "jump_forward" => JumpForward,
             "outline" => Outline,
             "help" => Help,
+            "toggle_spread" => ToggleSpread,
             "toggle_dark" => ToggleDark,
             "enter_draw" => EnterDraw,
             "exit_draw" => ExitDraw,
@@ -181,6 +183,7 @@ impl Action {
         "jump_forward",
         "outline",
         "help",
+        "toggle_spread",
         "toggle_dark",
         "enter_draw",
         "exit_draw",

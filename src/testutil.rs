@@ -275,33 +275,43 @@ fn crc32(data: &[u8]) -> u32 {
 
 /// A zip archive with every file stored (no compression).
 fn stored_zip(files: &[(String, String)]) -> Vec<u8> {
+    let entries: Vec<(&str, &[u8], u16, usize)> = files
+        .iter()
+        .map(|(n, d)| (n.as_str(), d.as_bytes(), 0u16, d.len()))
+        .collect();
+    zip_entries(&entries)
+}
+
+/// A zip archive of `(name, data as stored, method, uncompressed size)`.
+/// The CRC is only right for stored entries (readers here do not check it).
+pub fn zip_entries(files: &[(&str, &[u8], u16, usize)]) -> Vec<u8> {
     let mut out = Vec::new();
     let mut central = Vec::new();
     let u16le = |v: &mut Vec<u8>, x: u16| v.extend_from_slice(&x.to_le_bytes());
     let u32le = |v: &mut Vec<u8>, x: u32| v.extend_from_slice(&x.to_le_bytes());
-    for (name, data) in files {
-        let (name, data) = (name.as_bytes(), data.as_bytes());
-        let crc = crc32(data);
+    for &(name, data, method, size) in files {
+        let name = name.as_bytes();
+        let crc = if method == 0 { crc32(data) } else { 0 };
         let offset = out.len() as u32;
         u32le(&mut out, 0x0403_4b50);
-        for x in [20u16, 0, 0, 0, 0] {
+        for x in [20u16, 0, method, 0, 0] {
             u16le(&mut out, x); // version, flags, method, time, date
         }
         u32le(&mut out, crc);
         u32le(&mut out, data.len() as u32);
-        u32le(&mut out, data.len() as u32);
+        u32le(&mut out, size as u32);
         u16le(&mut out, name.len() as u16);
         u16le(&mut out, 0);
         out.extend_from_slice(name);
         out.extend_from_slice(data);
 
         u32le(&mut central, 0x0201_4b50);
-        for x in [20u16, 20, 0, 0, 0, 0] {
+        for x in [20u16, 20, 0, method, 0, 0] {
             u16le(&mut central, x); // made by, needed, flags, method, time, date
         }
         u32le(&mut central, crc);
         u32le(&mut central, data.len() as u32);
-        u32le(&mut central, data.len() as u32);
+        u32le(&mut central, size as u32);
         u16le(&mut central, name.len() as u16);
         for x in [0u16, 0, 0, 0] {
             u16le(&mut central, x); // extra, comment, disk, internal attrs
@@ -320,6 +330,69 @@ fn stored_zip(files: &[(String, String)]) -> Vec<u8> {
     u32le(&mut out, cd_offset);
     u16le(&mut out, 0);
     out
+}
+
+/// A fixed-layout (comic) EPUB: one PNG per page of the given pixel sizes,
+/// a viewport per page, right-to-left when `rtl`, and a table of contents
+/// with a chapter at page 1 and one at page 3.
+pub fn make_fxl_epub(sizes: &[(u32, u32)], rtl: bool) -> Vec<u8> {
+    let png = |w: u32, h: u32, shade: u8| -> Vec<u8> {
+        let cs = mupdf::Colorspace::device_rgb();
+        let mut pm = mupdf::Pixmap::new_with_w_h(&cs, w as i32, h as i32, false).expect("pixmap");
+        pm.clear_with(shade as i32).expect("clear");
+        let mut out = Vec::new();
+        pm.write_to(&mut out, mupdf::ImageFormat::PNG).expect("png");
+        out
+    };
+    let mut files: Vec<(String, Vec<u8>)> = vec![
+        ("mimetype".into(), b"application/epub+zip".to_vec()),
+        (
+            "META-INF/container.xml".into(),
+            br#"<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>"#.to_vec(),
+        ),
+    ];
+    let mut manifest = String::new();
+    let mut spine = String::new();
+    for (i, &(w, h)) in sizes.iter().enumerate() {
+        let n = i + 1;
+        files.push((
+            format!("OEBPS/images/p{n}.png"),
+            png(w, h, 40 + (i as u8 % 8) * 20),
+        ));
+        files.push((
+            format!("OEBPS/text/p{n}.xhtml"),
+            format!(
+                r#"<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml"><head><meta name="viewport" content="width={w}, height={h}"/><title>p{n}</title></head><body><img src="../images/p{n}.png" alt=""/></body></html>"#
+            )
+            .into_bytes(),
+        ));
+        manifest.push_str(&format!(
+            r#"<item id="img{n}" href="images/p{n}.png" media-type="image/png"/><item id="p{n}" href="text/p{n}.xhtml" media-type="application/xhtml+xml"/>"#
+        ));
+        let wide = if w > h {
+            r#" properties="rendition:page-spread-center""#
+        } else {
+            ""
+        };
+        spine.push_str(&format!(r#"<itemref idref="p{n}"{wide}/>"#));
+    }
+    files.push((
+        "OEBPS/nav.xhtml".into(),
+        br#"<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><body><nav epub:type="toc"><ol><li><a href="text/p1.xhtml">Chapter 1</a></li><li><a href="text/p3.xhtml">Chapter 2</a></li></ol></nav></body></html>"#.to_vec(),
+    ));
+    let dir = if rtl { "rtl" } else { "ltr" };
+    files.push((
+        "OEBPS/content.opf".into(),
+        format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="id" prefix="rendition: http://www.idpf.org/vocab/rendition/#"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="id">x</dc:identifier><dc:title>Comic &amp; Co</dc:title><meta property="rendition:layout">pre-paginated</meta><meta property="rendition:spread">landscape</meta></metadata><manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>{manifest}</manifest><spine page-progression-direction="{dir}">{spine}</spine></package>"#
+        )
+        .into_bytes(),
+    ));
+    let entries: Vec<(&str, &[u8], u16, usize)> = files
+        .iter()
+        .map(|(n, d)| (n.as_str(), d.as_slice(), 0u16, d.len()))
+        .collect();
+    zip_entries(&entries)
 }
 
 #[cfg(test)]

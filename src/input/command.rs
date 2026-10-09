@@ -28,6 +28,10 @@ pub enum Command {
     Help,
     Recent,
     FontSize(f32),
+    /// `:spread [on|off|auto]`.
+    Spread(Option<&'static str>),
+    /// `:direction [rtl|ltr]` (`None` toggles).
+    Direction(Option<bool>),
 }
 
 /// What a command takes after its name.
@@ -40,6 +44,8 @@ pub enum ArgKind {
     },
     Color,
     Number,
+    /// One of a few words.
+    Choice(&'static [&'static str]),
 }
 
 /// One entry of the registry: the single source of truth for parsing,
@@ -136,6 +142,22 @@ pub const COMMANDS: &[CommandSpec] = &[
         arg: ArgKind::Number,
         arg_hint: "{pt}",
         help: "text size of EPUB books",
+    },
+    CommandSpec {
+        name: "spread",
+        aliases: &[],
+        bang: false,
+        arg: ArgKind::Choice(&["on", "off", "auto"]),
+        arg_hint: "[on|off|auto]",
+        help: "two pages side by side (books: auto)",
+    },
+    CommandSpec {
+        name: "direction",
+        aliases: &["dir"],
+        bang: false,
+        arg: ArgKind::Choice(&["rtl", "ltr"]),
+        arg_hint: "[rtl|ltr]",
+        help: "page order in spreads (manga: rtl)",
     },
     CommandSpec {
         name: "recent",
@@ -235,6 +257,19 @@ pub fn parse(line: &str) -> Result<Option<Command>, String> {
         "width" => Command::Width(Some(number()?)),
         "fontsize" => Command::FontSize(number()?),
         "recent" => Command::Recent,
+        "spread" => match rest {
+            "" => Command::Spread(None),
+            "on" => Command::Spread(Some("on")),
+            "off" => Command::Spread(Some("off")),
+            "auto" => Command::Spread(Some("auto")),
+            _ => return Err("E474: Invalid argument: expected on, off or auto".into()),
+        },
+        "direction" => match rest {
+            "" => Command::Direction(None),
+            "rtl" => Command::Direction(Some(true)),
+            "ltr" => Command::Direction(Some(false)),
+            _ => return Err("E474: Invalid argument: expected rtl or ltr".into()),
+        },
         "help" => Command::Help,
         _ => return Err(format!("E492: Not an editor command: {name}")),
     };
@@ -464,6 +499,16 @@ mod tests {
         assert!(parse("width -1").is_err());
         assert!(parse("width abc").is_err());
         assert_eq!(parse("fontsize 12").unwrap(), Some(Command::FontSize(12.0)));
+        assert_eq!(
+            parse("spread auto").unwrap(),
+            Some(Command::Spread(Some("auto")))
+        );
+        assert_eq!(parse("spread").unwrap(), Some(Command::Spread(None)));
+        assert_eq!(
+            parse("dir rtl").unwrap(),
+            Some(Command::Direction(Some(true)))
+        );
+        assert!(parse("spread sideways").is_err());
     }
 
     #[test]

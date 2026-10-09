@@ -26,6 +26,7 @@ use crate::render::tiles;
 use crate::render::ui::Ui;
 use crate::render::{Highlight, Theme};
 use crate::session::{FileState, Session};
+use crate::view::layout::Side;
 use crate::view::spring;
 use crate::view::{Camera, Layout, ZoomMode};
 use crate::watch::Watcher;
@@ -99,6 +100,40 @@ pub struct DocState {
     pub tile_scale: f32,
     /// EPUB: laid out by MuPDF, read-only.
     pub reflowable: bool,
+    /// What the book says about direction and spreads (EPUB).
+    pub book: Option<crate::doc::BookInfo>,
+    /// Two pages side by side: off, on, or as the book and window suggest.
+    pub spread: SpreadMode,
+    /// Pages run right to left (manga): spreads put the first page right.
+    pub rtl: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SpreadMode {
+    #[default]
+    Off,
+    On,
+    /// On when the book asks for spreads and the window is wide enough.
+    Auto,
+}
+
+impl SpreadMode {
+    pub fn name(self) -> &'static str {
+        match self {
+            SpreadMode::Off => "off",
+            SpreadMode::On => "on",
+            SpreadMode::Auto => "auto",
+        }
+    }
+
+    pub fn from_name(s: &str) -> Option<SpreadMode> {
+        match s {
+            "off" => Some(SpreadMode::Off),
+            "on" => Some(SpreadMode::On),
+            "auto" => Some(SpreadMode::Auto),
+            _ => None,
+        }
+    }
 }
 
 pub enum LoadPurpose {
@@ -344,8 +379,45 @@ impl Viewer {
         self.relayout();
     }
 
+    /// Whether pages are shown in pairs right now.
+    pub fn spreads_active(&self) -> bool {
+        let Some(d) = &self.doc else { return false };
+        spreads_wanted(d.spread, d.book.as_ref(), self.camera.viewport)
+    }
+
+    /// Rebuild the page positions (spreads on or off, direction), keeping
+    /// the page at the top of the view where it is.
+    pub fn rebuild_layout(&mut self) {
+        let spreads = self.spreads_active();
+        let Some(d) = &mut self.doc else { return };
+        let top = d
+            .layout
+            .page_at_y(self.camera.offset[1] + self.camera.inset_doc());
+        let in_page = self.camera.offset[1] - d.layout.pages.get(top).map(|g| g.y).unwrap_or(0.0);
+        d.layout = page_layout(&d.metas, d.book.as_ref(), spreads, d.rtl);
+        if let Some(g) = d.layout.pages.get(top) {
+            self.camera.offset[1] = g.y + in_page;
+        }
+        self.camera.apply_mode(&d.layout, top);
+        self.camera.clamp(&d.layout);
+        self.staged_tiles.clear();
+        self.staged_keys.clear();
+        self.dirty = true;
+    }
+
     /// Re-apply fit modes and clamping after any size / layout change.
     fn relayout(&mut self) {
+        if let Some(d) = &self.doc {
+            let shown = d.layout.pages.len() > 1
+                && d.layout
+                    .pages
+                    .windows(2)
+                    .any(|w| (w[0].y - w[1].y).abs() < 0.01);
+            if shown != self.spreads_active() {
+                self.rebuild_layout();
+                return;
+            }
+        }
         if let Some(d) = &self.doc {
             let page = d.layout.page_at_y(self.camera.center_y());
             // Keep the page at the top of the viewport while the zoom changes.
@@ -361,9 +433,10 @@ impl Viewer {
         match &self.doc {
             Some(d) => format!(
                 "{}{} — mizu",
-                d.path
-                    .file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
+                d.book
+                    .as_ref()
+                    .and_then(|b| b.title.clone())
+                    .or_else(|| d.path.file_name().map(|n| n.to_string_lossy().into_owned()))
                     .unwrap_or_default(),
                 if self.is_dirty() { " [+]" } else { "" }
             ),
@@ -440,8 +513,31 @@ impl Viewer {
     }
 
     fn apply_loaded(&mut self, info: DocInfo, purpose: LoadPurpose) {
-        let sizes: Vec<(f32, f32)> = info.pages.iter().map(|p| (p.w, p.h)).collect();
-        let layout = Layout::new(&sizes);
+        let saved = self.session.get(&info.path).cloned();
+        // Spreads and direction: the session, else the book, else off.
+        let keep = matches!(purpose, LoadPurpose::Reload | LoadPurpose::Relayout { .. });
+        let (spread, rtl) = match (&self.doc, keep) {
+            (Some(old), true) => (old.spread, old.rtl),
+            _ => {
+                let book = info.book.as_ref();
+                let spread = saved
+                    .as_ref()
+                    .and_then(|s| s.spread.as_deref())
+                    .and_then(SpreadMode::from_name)
+                    .unwrap_or(if book.map(|b| b.fixed).unwrap_or(false) {
+                        SpreadMode::Auto
+                    } else {
+                        SpreadMode::Off
+                    });
+                let rtl = saved
+                    .as_ref()
+                    .and_then(|s| s.rtl)
+                    .unwrap_or(book.map(|b| b.rtl).unwrap_or(false));
+                (spread, rtl)
+            }
+        };
+        let spreads = spreads_wanted(spread, info.book.as_ref(), self.camera.viewport);
+        let layout = page_layout(&info.pages, info.book.as_ref(), spreads, rtl);
         let n = layout.len();
         let mut ink = Store::new(n);
         for s in info.strokes.iter().cloned() {
@@ -495,7 +591,6 @@ impl Viewer {
             }
         };
 
-        let saved = self.session.get(&info.path).cloned();
         let mut state = DocState {
             path: info.path.clone(),
             password: info.password.clone(),
@@ -519,6 +614,9 @@ impl Viewer {
             watcher_rx,
             tile_scale: 1.0,
             reflowable: info.reflowable,
+            book: info.book.clone(),
+            spread,
+            rtl,
         };
 
         if !keep_view {
@@ -544,7 +642,13 @@ impl Viewer {
                     }
                 }
                 None => {
-                    self.camera.mode = ZoomMode::FitWidth;
+                    // Comics read a page at a time; text by the width.
+                    let fixed = info.book.as_ref().map(|b| b.fixed).unwrap_or(false);
+                    self.camera.mode = if fixed {
+                        ZoomMode::FitPage
+                    } else {
+                        ZoomMode::FitWidth
+                    };
                     self.camera.offset = [0.0, 0.0];
                     self.set_dark(self.settings.dark_by_default);
                 }
@@ -619,6 +723,8 @@ impl Viewer {
             marks: d.marks.iter().map(|(c, p)| (*c, (p.page, p.y))).collect(),
             stamp: 0,
             font_size: d.reflowable.then_some(self.reflow.em),
+            spread: d.book.is_some().then(|| d.spread.name().to_string()),
+            rtl: d.book.as_ref().map(|_| d.rtl),
             fraction: Some(self.camera.offset[1] / d.layout.height.max(1.0)),
         };
         self.session.set(&d.path, st);
@@ -956,4 +1062,44 @@ impl Viewer {
 pub struct Tick {
     pub animating: bool,
     pub wake: Option<Instant>,
+}
+
+/// Pages side by side? `Auto` follows the book: never for `none`, always
+/// for `both`, and otherwise when the window is wider than tall.
+fn spreads_wanted(mode: SpreadMode, book: Option<&doc::BookInfo>, viewport: [f32; 2]) -> bool {
+    match mode {
+        SpreadMode::Off => false,
+        SpreadMode::On => true,
+        SpreadMode::Auto => match book.map(|b| b.spread) {
+            Some(doc::SpreadPref::None) | None => false,
+            Some(doc::SpreadPref::Both) => true,
+            Some(_) => viewport[0] > viewport[1],
+        },
+    }
+}
+
+fn page_layout(
+    metas: &[PageMeta],
+    book: Option<&doc::BookInfo>,
+    spreads: bool,
+    rtl: bool,
+) -> Layout {
+    let sizes: Vec<(f32, f32)> = metas.iter().map(|p| (p.w, p.h)).collect();
+    if !spreads {
+        return Layout::new(&sizes);
+    }
+    let sides: Vec<Side> = book
+        .map(|b| {
+            b.sides
+                .iter()
+                .map(|s| match s {
+                    doc::SpreadSide::Auto => Side::Auto,
+                    doc::SpreadSide::Left => Side::Left,
+                    doc::SpreadSide::Right => Side::Right,
+                    doc::SpreadSide::Center => Side::Alone,
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    Layout::spreads(&sizes, &sides, rtl)
 }

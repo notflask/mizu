@@ -14,10 +14,10 @@ use std::thread::JoinHandle;
 
 use crossbeam_channel::{unbounded, Receiver, Sender};
 use mupdf::pdf::PdfPage;
-use mupdf::{Colorspace, Device, DisplayList, Matrix, Pixmap, Rect};
+use mupdf::{ColorParams, Colorspace, Device, DisplayList, Image, Matrix, Pixmap, Rect};
 
 use super::annots;
-use super::{open_document, OpenDoc, Reflow};
+use super::{open_document, FixedDoc, OpenDoc, Reflow};
 
 /// Edge length of a tile slot in pixels.
 pub const TILE: u32 = 512;
@@ -339,8 +339,12 @@ impl WorkerCtx {
 }
 
 fn build_page(doc: &OpenDoc, index: usize) -> Result<CachedPage, String> {
+    if let OpenDoc::Fixed(f) = doc {
+        return build_image_page(f, index);
+    }
     let page = doc
         .doc()
+        .ok_or("no document")?
         .load_page(index as i32)
         .map_err(|e| e.to_string())?;
     let (b, list) = if doc.is_pdf() {
@@ -359,6 +363,33 @@ fn build_page(doc: &OpenDoc, index: usize) -> Result<CachedPage, String> {
         y0: b.y0,
         w: b.width().max(1.0),
         h: b.height().max(1.0),
+    })
+}
+
+/// A page of a fixed-layout book: its image, stretched to the page size.
+fn build_image_page(f: &FixedDoc, index: usize) -> Result<CachedPage, String> {
+    let p = f.book.pages.get(index).ok_or("no such page")?;
+    let name = p.image.as_deref().ok_or("page has no image")?;
+    let data = f.zip.read(name).map_err(|e| e.to_string())?;
+    let image = Image::from_bytes(&data).map_err(|e| e.to_string())?;
+    let (w, h) = (p.w.max(1.0), p.h.max(1.0));
+    let mut list = DisplayList::new(Rect::new(0.0, 0.0, w, h)).map_err(|e| e.to_string())?;
+    {
+        let dev = Device::from_display_list(&mut list).map_err(|e| e.to_string())?;
+        dev.fill_image(
+            &image,
+            &Matrix::new(w, 0.0, 0.0, h, 0.0, 0.0),
+            1.0,
+            ColorParams::default(),
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    Ok(CachedPage {
+        list,
+        x0: 0.0,
+        y0: 0.0,
+        w,
+        h,
     })
 }
 

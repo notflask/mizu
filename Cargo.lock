@@ -1579,6 +1579,7 @@ dependencies = [
  "lexopt",
  "log",
  "lyon_tessellation",
+ "miniz_oxide 0.8.9",
  "mupdf",
  "notify",
  "notify-debouncer-mini",

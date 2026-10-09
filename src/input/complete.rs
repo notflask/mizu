@@ -136,8 +136,12 @@ fn commands(word: &str, ctx: &Ctx) -> Suggestions {
             prefixed.insert(0, c);
         }
     }
-    items.extend(prefixed);
-    items.extend(fuzzy);
+    // Fuzzy matches only help when nothing starts with what was typed.
+    if prefixed.is_empty() {
+        items.extend(fuzzy);
+    } else {
+        items.extend(prefixed);
+    }
 
     // Ghost: the newest history entry that continues what is typed (fish),
     // otherwise the first command that does.
@@ -259,6 +263,31 @@ fn arguments(before: &str, space: usize, ctx: &Ctx) -> Suggestions {
                 ghost,
             }
         }
+        ArgKind::Choice(words) => {
+            let items: Vec<Candidate> = words
+                .iter()
+                .filter(|w| w.starts_with(arg))
+                .map(|w| Candidate {
+                    text: w.to_string(),
+                    label: w.to_string(),
+                    hint: String::new(),
+                    help: String::new(),
+                    swatch: None,
+                    dir: false,
+                    wants_arg: false,
+                })
+                .collect();
+            let ghost = if arg.is_empty() {
+                String::new()
+            } else {
+                ghost_from(&items, arg)
+            };
+            Suggestions {
+                word_start: arg_start,
+                items,
+                ghost,
+            }
+        }
         ArgKind::None | ArgKind::Number => Suggestions {
             word_start: arg_start,
             items: Vec::new(),
@@ -302,12 +331,14 @@ mod tests {
     }
 
     #[test]
-    fn prefix_matches_come_before_fuzzy_ones() {
+    fn prefix_matches_win_over_fuzzy_ones() {
         let c = ctx(&[], &no_files);
         let s = suggest("wi", 2, &c);
-        assert_eq!(texts(&s)[0], "width");
-        assert!(texts(&s).contains(&"write"), "fuzzy w..i: {:?}", texts(&s));
+        assert_eq!(texts(&s), vec!["width"]);
         assert_eq!(s.ghost, "dth");
+        // Nothing starts with "wrt": fuzzy finds write.
+        let s = suggest("wrt", 3, &c);
+        assert_eq!(texts(&s), vec!["write"]);
     }
 
     #[test]
@@ -397,9 +428,12 @@ mod tests {
     #[test]
     fn tab_inserts_the_common_prefix() {
         let c = ctx(&[], &no_files);
-        let s = suggest("d", 1, &c);
+        let s = suggest("da", 2, &c);
         assert_eq!(texts(&s), vec!["dark"]);
-        assert_eq!(tab_prefix(&s.items, "d").as_deref(), Some("dark"));
+        assert_eq!(tab_prefix(&s.items, "da").as_deref(), Some("dark"));
+        // "d": dark and direction share only the "d".
+        let s = suggest("d", 1, &c);
+        assert_eq!(tab_prefix(&s.items, "d"), None);
         let s = suggest("", 0, &c);
         assert_eq!(tab_prefix(&s.items, ""), None);
     }

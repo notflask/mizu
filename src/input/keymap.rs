@@ -96,6 +96,7 @@ impl Keymaps {
             ("<Tab>", JumpForward),
             ("o", Outline),
             ("<F1>", Help),
+            ("zs", ToggleSpread),
             ("D", ToggleDark),
             ("i", EnterDraw),
             ("u", Undo),
