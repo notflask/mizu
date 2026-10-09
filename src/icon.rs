@@ -10,7 +10,7 @@ pub fn window_icon() -> Option<Icon> {
         return None;
     }
     // A fully transparent file means the icons have not been generated yet.
-    if RGBA.chunks_exact(4).all(|p| p[3] == 0) {
+    if RGBA.as_chunks::<4>().0.iter().all(|p| p[3] == 0) {
         return None;
     }
     Icon::from_rgba(RGBA.to_vec(), 64, 64).ok()

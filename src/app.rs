@@ -161,7 +161,7 @@ fn write_ppm(path: &std::path::Path, c: &crate::render::Capture) -> std::io::Res
     let mut f = std::io::BufWriter::new(std::fs::File::create(path)?);
     write!(f, "P6\n{} {}\n255\n", c.width, c.height)?;
     let mut rgb = Vec::with_capacity((c.width * c.height * 3) as usize);
-    for px in c.rgba.chunks_exact(4) {
+    for px in c.rgba.as_chunks::<4>().0 {
         rgb.extend_from_slice(&px[..3]);
     }
     f.write_all(&rgb)

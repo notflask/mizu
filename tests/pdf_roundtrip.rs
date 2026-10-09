@@ -93,7 +93,9 @@ fn pool_renders_tiles_with_content() {
                 // lower tiles; here just verify the tile is not blank white.
                 let non_white = t
                     .data
-                    .chunks_exact(4)
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
                     .filter(|p| p[0] < 250 || p[1] < 250)
                     .count();
                 assert!(
@@ -101,7 +103,7 @@ fn pool_renders_tiles_with_content() {
                     "tile looks blank ({non_white} dark pixels)"
                 );
                 // alpha is opaque everywhere
-                assert!(t.data.chunks_exact(4).all(|p| p[3] == 255));
+                assert!(t.data.as_chunks::<4>().0.iter().all(|p| p[3] == 255));
                 pool.recycle(t.data);
             }
             Rendered::Thumb(t) => {
@@ -243,7 +245,9 @@ fn mizu_strokes_are_not_rendered_by_mupdf_but_foreign_annots_are() {
         Rendered::Tile(t) => {
             let black = t
                 .data
-                .chunks_exact(4)
+                .as_chunks::<4>()
+                .0
+                .iter()
                 .filter(|p| p[0] < 20 && p[1] < 20 && p[2] < 20)
                 .count();
             // Only the text may be dark; a rendered 400pt-wide stroke would

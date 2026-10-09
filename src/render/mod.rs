@@ -1233,7 +1233,7 @@ impl Renderer {
             for row in 0..sh as usize {
                 let line = &data[row * bpr as usize..row * bpr as usize + sw as usize * 4];
                 if bgra {
-                    for px in line.chunks_exact(4) {
+                    for px in line.as_chunks::<4>().0 {
                         rgba.extend_from_slice(&[px[2], px[1], px[0], px[3]]);
                     }
                 } else {

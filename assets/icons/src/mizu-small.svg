@@ -1,18 +1,18 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
   <defs>
     <linearGradient id="bg" x1="0.15" y1="0" x2="0.85" y2="1">
-      <stop offset="0" stop-color="#5B9BFF"/><stop offset="1" stop-color="#2349C9"/>
+      <stop offset="0" stop-color="#4F9BFF"/><stop offset="0.55" stop-color="#2F66EA"/><stop offset="1" stop-color="#1B36B8"/>
     </linearGradient>
     <linearGradient id="gloss" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.28"/><stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.26"/><stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
     </linearGradient>
     <clipPath id="clip"><path d="M250,40 L774,40 Q984,40 984,250 L984,774 Q984,984 774,984 L250,984 Q40,984 40,774 L40,250 Q40,40 250,40 Z"/></clipPath>
     <filter id="blur" x="-20%" y="-20%" width="140%" height="150%"><feGaussianBlur stdDeviation="22"/></filter>
-    <filter id="gblur" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="9"/></filter>
+    <filter id="blob" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="90"/></filter>
   </defs>
   
   <path d="M250,40 L774,40 Q984,40 984,250 L984,774 Q984,984 774,984 L250,984 Q40,984 40,774 L40,250 Q40,40 250,40 Z" fill="url(#bg)"/>
   
   
-  <g transform="translate(182.0,188.0) scale(6.6000)" ><path d="M50 6 L50 82 Q50 92 37 87" fill="none" stroke="#FFFFFF" stroke-width="13" stroke-linecap="round" stroke-linejoin="round"/><path d="M11 37 L37 35 Q31 60 12 77" fill="none" stroke="#FFFFFF" stroke-width="13" stroke-linecap="round" stroke-linejoin="round"/><path d="M67 21 Q61 49 40 68" fill="none" stroke="#FFFFFF" stroke-width="13" stroke-linecap="round" stroke-linejoin="round"/><path d="M55 44 Q69 62 89 82" fill="none" stroke="#FFFFFF" stroke-width="13" stroke-linecap="round" stroke-linejoin="round"/></g>
+  <g transform="translate(172.0,182.0) scale(6.8000)"><g transform="translate(0,2.5)" opacity="0.35"><path d="M50 6 L50 82 Q50 92 37 87" fill="none" stroke="#06165E" stroke-width="13" stroke-linecap="round" stroke-linejoin="round" /><path d="M11 37 L37 35 Q31 60 12 77" fill="none" stroke="#06165E" stroke-width="13" stroke-linecap="round" stroke-linejoin="round" /><path d="M67 21 Q61 49 40 68" fill="none" stroke="#06165E" stroke-width="13" stroke-linecap="round" stroke-linejoin="round" /><path d="M55 44 Q69 62 89 82" fill="none" stroke="#06165E" stroke-width="13" stroke-linecap="round" stroke-linejoin="round" /></g><path d="M50 6 L50 82 Q50 92 37 87" fill="none" stroke="#FFFFFF" stroke-width="13" stroke-linecap="round" stroke-linejoin="round" opacity="0.94"/><path d="M11 37 L37 35 Q31 60 12 77" fill="none" stroke="#FFFFFF" stroke-width="13" stroke-linecap="round" stroke-linejoin="round" opacity="0.94"/><path d="M67 21 Q61 49 40 68" fill="none" stroke="#FFFFFF" stroke-width="13" stroke-linecap="round" stroke-linejoin="round" opacity="0.94"/><path d="M55 44 Q69 62 89 82" fill="none" stroke="#FFFFFF" stroke-width="13" stroke-linecap="round" stroke-linejoin="round" opacity="0.94"/></g>
 </svg>
