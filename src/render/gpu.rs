@@ -52,10 +52,12 @@ impl Gpu {
         .map_err(|e| anyhow!("no suitable GPU adapter found: {e}"))?;
         let info = adapter.get_info();
         log::info!(
-            "GPU: {} ({:?}, {:?})",
+            "GPU: {} ({:?}, {:?}), driver {} {}",
             info.name,
             info.device_type,
-            info.backend
+            info.backend,
+            info.driver,
+            info.driver_info
         );
         if info.backend == wgpu::Backend::Gl {
             log::warn!(
@@ -72,11 +74,8 @@ impl Gpu {
         device.on_uncaptured_error(Arc::new(|e| log::error!("wgpu: {e}")));
 
         let caps = surface.get_capabilities(&adapter);
-        let format = caps
-            .formats
-            .iter()
-            .copied()
-            .find(|f| f.is_srgb())
+        let format = super::diag::format_override(&caps.formats)
+            .or_else(|| caps.formats.iter().copied().find(|f| f.is_srgb()))
             .or_else(|| caps.formats.first().copied())
             .ok_or_else(|| anyhow!("surface reports no formats"))?;
         let size = window.inner_size();
@@ -89,7 +88,9 @@ impl Gpu {
             format,
             width: size.width.max(1),
             height: size.height.max(1),
-            present_mode: wgpu::PresentMode::AutoVsync,
+            present_mode: super::diag::present_mode_override()
+                .filter(|m| caps.present_modes.contains(m) || *m == wgpu::PresentMode::AutoVsync)
+                .unwrap_or(wgpu::PresentMode::AutoVsync),
             alpha_mode: caps
                 .alpha_modes
                 .iter()

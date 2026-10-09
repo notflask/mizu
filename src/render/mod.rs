@@ -3,6 +3,7 @@
 //! per-page instance buffers, UI from glyphon.
 
 pub mod atlas;
+pub mod diag;
 pub mod gpu;
 pub mod overlay;
 pub mod recolor;

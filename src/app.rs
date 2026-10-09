@@ -31,6 +31,7 @@ pub struct Options {
     pub file: Option<PathBuf>,
     pub page: Option<usize>,
     pub stats: bool,
+    pub diag: bool,
 }
 
 pub struct App {
@@ -48,6 +49,49 @@ pub struct App {
     pinch_pos: Option<[f32; 2]>,
     touch_id: Option<u64>,
     pub exit_error: Option<String>,
+    diag: Option<Diag>,
+    presented_once: bool,
+}
+
+/// `--diag`: reads back some frames and logs what they contain.
+struct Diag {
+    frames: u32,
+    last: Instant,
+    want: bool,
+}
+
+impl Diag {
+    fn before(&mut self, r: &mut Renderer, now: Instant) {
+        self.want = self.frames < 8 || now.duration_since(self.last) > Duration::from_secs(3);
+        if self.want {
+            r.request_capture();
+        }
+    }
+
+    fn after(&mut self, r: &mut Renderer, fs: &crate::render::FrameStats, now: Instant) {
+        self.frames += 1;
+        if !std::mem::take(&mut self.want) {
+            return;
+        }
+        self.last = now;
+        let head = format!(
+            "diag frame {}: draw calls {}, page quads {}, stroke quads {}, tiles {}/{}, skipped {:?}",
+            self.frames,
+            fs.draw_calls,
+            fs.image_instances,
+            fs.stroke_instances,
+            fs.tiles_cached,
+            fs.tile_slots,
+            fs.skipped
+        );
+        match r.take_capture() {
+            Some(cap) => log::info!(
+                "{head}\n{}",
+                crate::render::diag::describe(&cap, r.bar_height().ceil() as u32)
+            ),
+            None => log::info!("{head}\n  (nothing read back)"),
+        }
+    }
 }
 
 // ----------------------------------------------------------------------
@@ -191,6 +235,11 @@ impl App {
             },
             Err(_) => None,
         };
+        let diag = (opts.diag || std::env::var_os("MIZU_DIAG").is_some()).then(|| Diag {
+            frames: 0,
+            last: Instant::now(),
+            want: false,
+        });
         App {
             viewer,
             renderer: None,
@@ -202,7 +251,9 @@ impl App {
             stats: FrameTimes {
                 samples: VecDeque::new(),
             },
-            capture_enabled: script.is_some(),
+            capture_enabled: script.is_some() || diag.is_some(),
+            diag,
+            presented_once: false,
             script,
             platform: None,
             pinch_pos: None,
@@ -439,6 +490,13 @@ impl ApplicationHandler<UserEvent> for App {
             }),
         );
         self.sync_window_size();
+        let size = window.inner_size();
+        log::info!(
+            "window: {}x{} px at scale {}",
+            size.width,
+            size.height,
+            window.scale_factor()
+        );
         window.request_redraw();
     }
 
@@ -458,6 +516,27 @@ impl ApplicationHandler<UserEvent> for App {
                 self.redraw();
             }
             WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => {
+                if let Some(w) = &self.window {
+                    let level = if self.diag.is_some() {
+                        log::Level::Info
+                    } else {
+                        log::Level::Debug
+                    };
+                    log::log!(
+                        level,
+                        "window event: {}; now {}x{} at scale {}",
+                        match &event {
+                            WindowEvent::Resized(s) =>
+                                format!("resized to {}x{}", s.width, s.height),
+                            WindowEvent::ScaleFactorChanged { scale_factor, .. } =>
+                                format!("scale factor {scale_factor}"),
+                            _ => String::new(),
+                        },
+                        w.inner_size().width,
+                        w.inner_size().height,
+                        w.scale_factor()
+                    );
+                }
                 self.sync_window_size();
                 self.redraw();
             }
@@ -628,6 +707,9 @@ impl App {
             let empty = crate::ink::Store::new(0);
             let layout = crate::view::Layout::default();
             let t0 = Instant::now();
+            if let Some(d) = &mut self.diag {
+                d.before(renderer, now);
+            }
             let fs = renderer.render(&FrameInput {
                 camera: &v.camera,
                 layout: &layout,
@@ -640,6 +722,9 @@ impl App {
                 ui: &ui,
                 current_page: 0,
             });
+            if let Some(d) = &mut self.diag {
+                d.after(renderer, &fs, now);
+            }
             self.stats.push(now, t0.elapsed().as_secs_f32() * 1000.0);
             let retry = self.retry_after(&fs, now);
             self.finish_frame(
@@ -665,7 +750,22 @@ impl App {
             current_page: v.current_page(),
         };
         let t0 = Instant::now();
+        if let Some(d) = &mut self.diag {
+            d.before(renderer, now);
+        }
         let fs = renderer.render(&input);
+        if let Some(d) = &mut self.diag {
+            d.after(renderer, &fs, now);
+        }
+        if !self.presented_once && fs.skipped.is_none() {
+            self.presented_once = true;
+            let [w, h] = renderer.surface_size();
+            log::info!(
+                "first frame presented: {w}x{h} px, scale {}, {} page(s)",
+                v.camera.dpr,
+                d.layout.pages.len()
+            );
+        }
         let ms = t0.elapsed().as_secs_f32() * 1000.0;
         self.stats.push(now, ms);
         log::trace!("frame {ms:.2}ms {fs:?}");

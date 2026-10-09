@@ -16,6 +16,7 @@ USAGE:
 OPTIONS:
     -p, --page <N>    Open at page N (overrides the remembered position)
         --stats       Show frame timings in the status line
+        --diag        Log what is drawn (for bug reports; same as MIZU_DIAG=1)
     -h, --help        Show this help
     -V, --version     Show the version
 
@@ -27,6 +28,7 @@ fn parse_args() -> Result<Option<Options>, lexopt::Error> {
         file: None,
         page: None,
         stats: false,
+        diag: false,
     };
     let mut parser = lexopt::Parser::from_env();
     while let Some(arg) = parser.next()? {
@@ -44,6 +46,7 @@ fn parse_args() -> Result<Option<Options>, lexopt::Error> {
                 opts.page = Some(n.saturating_sub(1));
             }
             Long("stats") => opts.stats = true,
+            Long("diag") => opts.diag = true,
             Value(v) if opts.file.is_none() => opts.file = Some(PathBuf::from(v)),
             _ => return Err(arg.unexpected()),
         }

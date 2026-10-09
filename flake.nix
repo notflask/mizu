@@ -17,12 +17,28 @@
         default = mizu;
       });
 
-      apps = forAll (pkgs: {
-        default = {
-          type = "app";
-          program = "${self.packages.${pkgs.stdenv.hostPlatform.system}.mizu}/bin/mizu";
-        };
-      });
+      apps = forAll (pkgs:
+        let
+          mizu = self.packages.${pkgs.stdenv.hostPlatform.system}.mizu;
+          # Opens mizu in a few graphics configurations and prints a report;
+          # for tracking down "the window stays black" on a given machine.
+          diagnose = pkgs.writeShellApplication {
+            name = "mizu-diagnose";
+            runtimeInputs = [ mizu pkgs.coreutils pkgs.gnugrep ]
+              ++ pkgs.lib.optional pkgs.stdenv.hostPlatform.isLinux pkgs.vulkan-tools;
+            text = builtins.readFile ./nix/diagnose.sh;
+          };
+        in
+        {
+          default = {
+            type = "app";
+            program = "${mizu}/bin/mizu";
+          };
+          diagnose = {
+            type = "app";
+            program = "${diagnose}/bin/mizu-diagnose";
+          };
+        });
 
       devShells = forAll (pkgs: {
         default = pkgs.callPackage ./nix/shell.nix { };
