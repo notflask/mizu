@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/icons/generated/linux/hicolor/128x128/apps/io.github.notflask.Mizu.png" width="96" alt="mizu icon">
+</p>
+
 # mizu 水
 
 A small PDF viewer I wrote for studying. It does four things and tries to do them well:
@@ -14,7 +18,7 @@ It runs on Linux (the machine I actually use it on: NixOS with Niri and Hyprland
 
 <p align="center">
   <img src="docs/screenshots/light.png" width="48%" alt="light page with a search hit">
-  <img src="docs/screenshots/dark.png" width="48%" alt="the same page in dark mode">
+  <img src="docs/screenshots/dark.png" width="48%" alt="the same page in dark mode, with some ink">
 </p>
 
 ## Why another PDF viewer
@@ -207,6 +211,30 @@ Things to know:
 - There is no text selection or copying. That is deliberate for now: it is a reader with a pen.
 - I develop and test on Linux. The Windows and macOS builds compile in CI but have seen much less
   real use.
+
+## Troubleshooting
+
+If the window opens but stays black (or blank), the quickest way to find out why is
+`--diag`: mizu then reads a few frames back from the GPU and logs how much of them is lit.
+
+```sh
+RUST_LOG=mizu=info,wgpu=warn mizu --diag some.pdf
+```
+
+"non-black 0 %" means the GPU really drew nothing; a lit frame that you cannot see means the
+problem is between the graphics driver and the compositor. These switches help to narrow it
+down (all are environment variables):
+
+| Variable | Effect |
+| --- | --- |
+| `WGPU_BACKEND=vulkan` / `gl` | pick the graphics API |
+| `WGPU_POWER_PREF=high` | prefer the discrete GPU |
+| `MIZU_PRESENT_MODE=fifo` / `mailbox` / `immediate` | swap-chain present mode |
+| `MIZU_SURFACE_FORMAT=bgra` / `rgba` | channel order of the swap chain |
+| `MIZU_NO_PLATFORM_INPUT=1` | do not start the Wayland pen/pinch backend |
+
+On Nix, `nix run github:notflask/mizu#diagnose -- some.pdf` runs mizu in several of these
+configurations one after the other, asks which of them showed the page, and prints a report.
 
 ## Development
 
