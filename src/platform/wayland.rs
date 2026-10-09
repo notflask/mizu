@@ -261,11 +261,9 @@ impl Dispatch<ZwpPointerGesturePinchV1, ()> for State {
                     }
                 }
             }
-            zwp_pointer_gesture_pinch_v1::Event::End { .. } => {
-                if state.pinch_active {
-                    state.pinch_active = false;
-                    (state.emit)(PlatformEvent::PinchEnd);
-                }
+            zwp_pointer_gesture_pinch_v1::Event::End { .. } if state.pinch_active => {
+                state.pinch_active = false;
+                (state.emit)(PlatformEvent::PinchEnd);
             }
             _ => {}
         }
