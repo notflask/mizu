@@ -157,7 +157,7 @@ impl Viewer {
         let (dx, dy) = (pos[0] - old[0], pos[1] - old[1]);
 
         if self.pen.is_active() {
-            self.pen_move(pos, None);
+            self.pen_move(pos, self.pressure_hint.map(|h| h.0));
         } else if self.mouse.middle || self.mouse.panning {
             self.scroll_by(-dx, -dy, false);
         } else if self.mouse.left {
@@ -190,8 +190,9 @@ impl Viewer {
                 self.mouse.press_at = Some(pos);
                 self.mouse.panning = false;
                 if drawing {
-                    let erase = self.tool == Tool::Eraser;
-                    self.pen_down(pos, None, erase);
+                    let hint = self.pressure_hint;
+                    let erase = self.tool == Tool::Eraser || hint.is_some_and(|h| h.1);
+                    self.pen_down(pos, hint.map(|h| h.0), erase);
                 }
             }
             (Button::Left, false) => {

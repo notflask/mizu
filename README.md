@@ -264,9 +264,12 @@ auto-reload when the file changes on disk, password-protected PDFs, and session 
 
 Things to know:
 
-- Pen **pressure** and the **eraser end** work on Wayland (`tablet-v2`, together with touchpad pinch
-  through `pointer-gestures`). On Windows, pens arrive through winit's touch events with force.
-  Compositors without these protocols fall back to mouse behaviour and `Ctrl` + scroll.
+- Pen **pressure** and the **eraser end**: on Wayland through `tablet-v2` (with touchpad pinch through
+  `pointer-gestures`); on macOS through the system's tablet events; on X11 through XInput 2 (the
+  tablet's pressure axis; pinch through XInput 2.4 gestures); on Windows through pointer messages.
+  Without a tablet, or on a compositor without these protocols, mizu falls back to mouse behaviour
+  and `Ctrl` + scroll. The macOS, X11 and Windows paths are written against the platform APIs and
+  type-checked, but have seen less real use than Wayland.
 - There is no text selection or copying. That is deliberate for now: it is a reader with a pen.
 - I develop and test on Linux. The Windows and macOS builds compile in CI but have seen much less
   real use.

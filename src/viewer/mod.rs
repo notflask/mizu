@@ -178,6 +178,8 @@ pub struct Viewer {
     /// Layout of EPUB books (`:fontsize` changes the text size).
     pub reflow: crate::doc::Reflow,
     pub pen: draw::PenState,
+    /// X11: pressure (and eraser end) of the pen driving the mouse pointer.
+    pub pressure_hint: Option<(f32, bool)>,
     pub mouse: MouseState,
     pub quit: bool,
     close_armed: Option<Instant>,
@@ -231,6 +233,7 @@ impl Viewer {
                 .unwrap_or([0x1a, 0x1a, 0x1a]),
             pen_width: settings.pen_width,
             reflow: settings.reflow,
+            pressure_hint: None,
             dark: settings.dark_by_default,
             theme,
             keymaps,

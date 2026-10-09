@@ -60,6 +60,8 @@ pub struct App {
     chrome_edited: bool,
     /// Time of the last click in the title strip, for double-clicks.
     title_click: Option<Instant>,
+    /// When the X11 backend last reported pen pressure.
+    pressure_at: Option<Instant>,
 }
 
 /// `--diag`: reads back some frames and logs what they contain.
@@ -268,6 +270,7 @@ impl App {
             chrome_dark: None,
             chrome_edited: false,
             title_click: None,
+            pressure_at: None,
             script,
             platform: None,
             pinch_pos: None,
@@ -397,6 +400,10 @@ impl App {
                 } else {
                     self.viewer.on_mouse_button(Button::Left, false);
                 }
+            }
+            PlatformEvent::PenPressure { pressure, eraser } => {
+                self.viewer.pressure_hint = Some((pressure, eraser));
+                self.pressure_at = Some(Instant::now());
             }
         }
         self.viewer.dirty = true;
@@ -647,6 +654,14 @@ impl ApplicationHandler<UserEvent> for App {
                 }
             }
             WindowEvent::CursorMoved { position, .. } => {
+                // Pressure belongs to a pen; a mouse moving later has none.
+                if self
+                    .pressure_at
+                    .is_some_and(|t| t.elapsed() > Duration::from_millis(80))
+                {
+                    self.pressure_at = None;
+                    self.viewer.pressure_hint = None;
+                }
                 self.viewer
                     .on_cursor_moved([position.x as f32, position.y as f32]);
                 self.redraw();
@@ -698,7 +713,8 @@ impl ApplicationHandler<UserEvent> for App {
                             self.viewer.mouse.pos = pos;
                             self.viewer.mouse.inside = true;
                             if self.viewer.mode == UiMode::Draw {
-                                let erase = self.viewer.tool == crate::viewer::Tool::Eraser;
+                                let erase = self.viewer.tool == crate::viewer::Tool::Eraser
+                                    || platform::pen_eraser_active();
                                 self.viewer.pen_down(pos, pressure, erase);
                             } else {
                                 self.viewer.on_mouse_button(Button::Left, true);
