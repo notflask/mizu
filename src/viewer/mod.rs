@@ -312,6 +312,23 @@ impl Viewer {
     // ------------------------------------------------------------------
 
     /// Tell the viewer how large the window is and how sharp the display is.
+    /// Physical pixels covered at the top of the window (macOS title bar).
+    pub fn set_top_inset(&mut self, px: f32) {
+        if (self.camera.top_inset - px).abs() < 0.5 {
+            return;
+        }
+        let top = self.camera.offset[1] + self.camera.inset_doc();
+        self.camera.top_inset = px;
+        // Keep what was right below the old strip right below the new one.
+        self.camera.offset[1] = top - self.camera.inset_doc();
+        if let Some(d) = &self.doc {
+            let page = d.layout.page_at_y(self.camera.center_y());
+            self.camera.apply_mode(&d.layout, page);
+            self.camera.clamp(&d.layout);
+        }
+        self.dirty = true;
+    }
+
     pub fn set_window(&mut self, size: [u32; 2], dpr: f32) {
         self.window_size = size;
         self.camera.dpr = dpr;

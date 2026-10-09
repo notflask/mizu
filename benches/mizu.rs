@@ -83,6 +83,7 @@ fn bench_view(c: &mut Criterion) {
         zoom: 2.0,
         dpr: 1.0,
         viewport: [1920.0, 1080.0],
+        top_inset: 0.0,
         mode: ZoomMode::Free,
     };
     let [_, y0, _, y1] = cam.visible_doc_rect();

@@ -255,6 +255,8 @@ impl Viewer {
 
     fn goto_y(&mut self, y: f32, animated: bool) {
         let Some(d) = &self.doc else { return };
+        // Below the title bar, where there is one.
+        let y = y - self.camera.inset_doc();
         let target = self.camera.clamped(&d.layout, [self.camera.offset[0], y]);
         if animated {
             self.anim_target = Some(target);
@@ -509,6 +511,18 @@ impl Viewer {
                 }
             }
         }
+    }
+
+    /// A file handed over by the system (Finder, the Dock): like `:e`.
+    pub fn open_from_outside(&mut self, path: PathBuf) {
+        if self.path() == Some(path.as_path()) {
+            return;
+        }
+        if self.is_dirty() {
+            self.error(E37);
+            return;
+        }
+        self.open(path, LoadPurpose::Open { page: Option::None });
     }
 
     /// `:fontsize`: lay the book out again with another text size, keeping

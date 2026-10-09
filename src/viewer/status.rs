@@ -2,7 +2,7 @@
 
 use super::{ListKind, Tool, UiMode, Viewer};
 use crate::render::recolor::{recolor_srgb8, DarkTheme};
-use crate::render::ui::{ListOverlay, PenUi, Popup, PopupRow, UiState};
+use crate::render::ui::{ListOverlay, PenUi, Popup, PopupRow, Titlebar, UiState};
 use crate::render::Highlight;
 
 impl Viewer {
@@ -186,6 +186,17 @@ impl Viewer {
                 title,
                 selected: self.outline_sel.min(lines.len().saturating_sub(1)),
                 lines,
+            });
+        }
+
+        if self.camera.top_inset > 0.0 {
+            st.titlebar = Some(Titlebar {
+                height: self.camera.top_inset,
+                text: match &name {
+                    Some(n) if self.is_dirty() => format!("{n}  ●"),
+                    Some(n) => n.clone(),
+                    None => "mizu".into(),
+                },
             });
         }
 

@@ -17,6 +17,9 @@ No toolbar, no menus, no sidebar. A page and one line of status at the bottom, s
 zathura and sioyek.
 
 It runs on Linux (the machine I actually use it on: NixOS with Niri and Hyprland), Windows and macOS.
+On macOS the window has no grey title bar: the page goes up to the top edge, the traffic lights sit
+on a thin strip with the file name (drag it to move the window, double-click it to zoom), and the
+window follows mizu's dark mode. Double-clicking a PDF or EPUB in Finder opens it in mizu.
 
 <p align="center">
   <img src="docs/screenshots/light.png" width="48%" alt="light page with a search hit">

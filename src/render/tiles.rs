@@ -244,6 +244,7 @@ mod tests {
             zoom,
             dpr: 1.0,
             viewport: [1000.0, 800.0],
+            top_inset: 0.0,
             mode: ZoomMode::Free,
         }
     }
@@ -400,6 +401,7 @@ mod tests {
             zoom: 1.37,
             dpr: 1.0,
             viewport: [800.0, 600.0],
+            top_inset: 0.0,
             mode: ZoomMode::Free,
         };
         let g = PageGeom {

@@ -79,6 +79,16 @@ fn main() -> ExitCode {
             return ExitCode::from(1);
         }
     };
+    #[cfg(target_os = "macos")]
+    {
+        // Documents opened from Finder (also the one that launched mizu).
+        let proxy = std::sync::Mutex::new(event_loop.create_proxy());
+        mizu::platform::macos::install_open_handler(Box::new(move |p| {
+            if let Ok(proxy) = proxy.lock() {
+                let _ = proxy.send_event(UserEvent::OpenFile(p));
+            }
+        }));
+    }
     let mut app = App::new(opts, event_loop.create_proxy());
     if let Err(e) = event_loop.run_app(&mut app) {
         eprintln!("mizu: {e}");

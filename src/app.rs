@@ -25,6 +25,8 @@ pub enum UserEvent {
     /// A background thread has something for us.
     Wake,
     Platform(PlatformEvent),
+    /// A document opened from outside (Finder on macOS).
+    OpenFile(PathBuf),
 }
 
 pub struct Options {
@@ -53,6 +55,11 @@ pub struct App {
     presented_once: bool,
     /// Last cursor set on the window; setting it is a compositor request.
     cursor_icon: Option<CursorIcon>,
+    /// Dark mode the window chrome was last set up for.
+    chrome_dark: Option<bool>,
+    chrome_edited: bool,
+    /// Time of the last click in the title strip, for double-clicks.
+    title_click: Option<Instant>,
 }
 
 /// `--diag`: reads back some frames and logs what they contain.
@@ -258,6 +265,9 @@ impl App {
             diag,
             presented_once: false,
             cursor_icon: None,
+            chrome_dark: None,
+            chrome_edited: false,
+            title_click: None,
             script,
             platform: None,
             pinch_pos: None,
@@ -280,6 +290,64 @@ impl App {
         r.resize(size.width, size.height);
         self.viewer
             .set_window([size.width, size.height], w.scale_factor() as f32);
+        let inset = title_strip_height(w) * w.scale_factor() as f32;
+        self.viewer.set_top_inset(inset);
+    }
+
+    /// macOS: the window chrome follows mizu's dark mode (traffic lights,
+    /// background while resizing) and shows unsaved ink in the close button.
+    fn sync_chrome(&mut self) {
+        let Some(w) = &self.window else { return };
+        let dark = self.viewer.dark;
+        if self.chrome_dark != Some(dark) {
+            self.chrome_dark = Some(dark);
+            #[cfg(target_os = "macos")]
+            {
+                use winit::window::Theme;
+                w.set_theme(Some(if dark { Theme::Dark } else { Theme::Light }));
+                let bg = if dark {
+                    self.viewer.theme.dark_bg
+                } else {
+                    [255, 255, 255]
+                };
+                platform::macos::set_window_background(w, bg);
+            }
+        }
+        let edited = self.viewer.is_dirty();
+        if self.chrome_edited != edited {
+            self.chrome_edited = edited;
+            #[cfg(target_os = "macos")]
+            {
+                use winit::platform::macos::WindowExtMacOS;
+                w.set_document_edited(edited);
+            }
+        }
+        let _ = w;
+    }
+
+    /// A left click in the title strip: move the window, or what a
+    /// double-click on a title bar does.
+    fn title_strip_click(&mut self) -> bool {
+        let Some(w) = &self.window else { return false };
+        if self.viewer.camera.top_inset <= 0.0
+            || self.viewer.mouse.pos[1] >= self.viewer.camera.top_inset
+            || self.viewer.mode == UiMode::Outline
+        {
+            return false;
+        }
+        let now = Instant::now();
+        let double = self
+            .title_click
+            .is_some_and(|t| now.duration_since(t) < Duration::from_millis(400));
+        if double {
+            self.title_click = None;
+            #[cfg(target_os = "macos")]
+            platform::macos::title_double_click(w);
+        } else {
+            self.title_click = Some(now);
+            let _ = w.drag_window();
+        }
+        true
     }
 
     fn handle_platform(&mut self, ev: PlatformEvent) {
@@ -463,6 +531,15 @@ impl ApplicationHandler<UserEvent> for App {
             attrs = WindowAttributesExtWayland::with_name(attrs, crate::config::APP_ID, "mizu");
             attrs = WindowAttributesExtX11::with_name(attrs, "mizu", crate::config::APP_ID);
         }
+        #[cfg(target_os = "macos")]
+        {
+            // Content runs up to the top edge; mizu draws the title strip.
+            use winit::platform::macos::WindowAttributesExtMacOS;
+            attrs = attrs
+                .with_titlebar_transparent(true)
+                .with_title_hidden(true)
+                .with_fullsize_content_view(true);
+        }
         if let Some(icon) = crate::icon::window_icon() {
             attrs = attrs.with_window_icon(Some(icon));
         }
@@ -512,6 +589,7 @@ impl ApplicationHandler<UserEvent> for App {
         match event {
             UserEvent::Wake => self.viewer.dirty = true,
             UserEvent::Platform(ev) => self.handle_platform(ev),
+            UserEvent::OpenFile(p) => self.viewer.open_from_outside(p),
         }
         self.redraw();
     }
@@ -584,9 +662,12 @@ impl ApplicationHandler<UserEvent> for App {
                     MouseButton::Right => Some(Button::Right),
                     _ => None,
                 };
+                let pressed = state == ElementState::Pressed;
+                if b == Some(Button::Left) && pressed && self.title_strip_click() {
+                    return;
+                }
                 if let Some(b) = b {
-                    self.viewer
-                        .on_mouse_button(b, state == ElementState::Pressed);
+                    self.viewer.on_mouse_button(b, pressed);
                     self.redraw();
                 }
             }
@@ -836,6 +917,7 @@ impl App {
         wake: Option<Instant>,
         zoom_wake: Option<Instant>,
     ) {
+        self.sync_chrome();
         let title = self.viewer.title();
         if title != self.title {
             window.set_title(&title);
@@ -871,5 +953,26 @@ impl App {
         if self.viewer.quit {
             event_loop.exit();
         }
+    }
+}
+
+/// Height of the strip under a transparent title bar, in logical pixels:
+/// the real title bar on macOS (0 in full screen), elsewhere 0 unless
+/// `MIZU_TITLEBAR_INSET` asks for one (for testing the strip).
+fn title_strip_height(window: &Window) -> f32 {
+    if let Some(v) = std::env::var("MIZU_TITLEBAR_INSET")
+        .ok()
+        .and_then(|v| v.parse::<f32>().ok())
+    {
+        return v.max(0.0);
+    }
+    #[cfg(target_os = "macos")]
+    {
+        platform::macos::titlebar_height(window)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = window;
+        0.0
     }
 }

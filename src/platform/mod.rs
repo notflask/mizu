@@ -2,8 +2,10 @@
 //! pressure (with the eraser end).
 //!
 //! - Wayland: `tablet-v2` and `pointer-gestures-v1` (this module's `wayland`).
-//! - Windows and macOS: pens already arrive as winit `Touch` events with
-//!   `force`, and macOS pinch as `PinchGesture`; `app.rs` handles those.
+//! - macOS: an `NSEvent` monitor for tablet events (`macos`); pinch comes
+//!   from winit as `PinchGesture`. `macos` also has the title bar helpers
+//!   and the handler for documents opened from Finder.
+//! - Windows: pens arrive as winit `Touch` events with `force`.
 //!
 //! Backends degrade silently: if a protocol or API is missing, mizu keeps
 //! using the mouse events winit provides. Set `MIZU_NO_PLATFORM_INPUT=1` to
@@ -14,6 +16,8 @@ use std::sync::Arc;
 
 use winit::window::Window;
 
+#[cfg(target_os = "macos")]
+pub mod macos;
 #[cfg(all(unix, not(target_os = "macos")))]
 mod wayland;
 
@@ -69,6 +73,10 @@ pub fn init(window: &Window, emit: Emit) -> Option<Platform> {
     let mut backends: Vec<Box<dyn Any>> = Vec::new();
     #[cfg(all(unix, not(target_os = "macos")))]
     if let Some(b) = wayland::init(window, emit.clone()) {
+        backends.push(b);
+    }
+    #[cfg(target_os = "macos")]
+    if let Some(b) = macos::init(window, emit.clone()) {
         backends.push(b);
     }
     let _ = (window, &emit);

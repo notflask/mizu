@@ -66,6 +66,16 @@ pub struct UiState {
     pub overlay: Option<ListOverlay>,
     pub hint: Option<String>,
     pub dark: bool,
+    /// macOS: the strip under the transparent title bar.
+    pub titlebar: Option<Titlebar>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Titlebar {
+    /// Height in physical pixels.
+    pub height: f32,
+    /// Centred, dimmed (the file name).
+    pub text: String,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -89,6 +99,7 @@ pub struct Ui {
     hint: Buffer,
     ghost: Buffer,
     popup: Buffer,
+    title_bar: Buffer,
     shown: UiState,
     shown_layout: Option<Layout>,
     system_fonts_loaded: bool,
@@ -108,6 +119,7 @@ enum Which {
     Hint,
     Ghost,
     Popup,
+    TitleBar,
 }
 
 struct Area {
@@ -153,6 +165,7 @@ impl Ui {
         let hint = mk(&mut font_system);
         let ghost = mk(&mut font_system);
         let popup = mk(&mut font_system);
+        let title_bar = mk(&mut font_system);
         Ui {
             font_system,
             swash: SwashCache::new(),
@@ -167,6 +180,7 @@ impl Ui {
             hint,
             ghost,
             popup,
+            title_bar,
             shown: UiState::default(),
             shown_layout: None,
             system_fonts_loaded: false,
@@ -201,6 +215,7 @@ impl Ui {
             Which::Hint => &mut self.hint,
             Which::Ghost => &mut self.ghost,
             Which::Popup => &mut self.popup,
+            Which::TitleBar => &mut self.title_bar,
         };
         buf.set_metrics(metrics);
         buf.set_size(w, h);
@@ -406,6 +421,23 @@ impl Ui {
                     color: fg,
                 });
             }
+            if let Some(tb) = &state.titlebar {
+                let tw = tb.text.chars().count() as f32 * cw;
+                self.set_text(
+                    Which::TitleBar,
+                    &tb.text,
+                    Some(tw + cw),
+                    Some(line_h * 1.5),
+                    metrics,
+                );
+                self.areas.push(Area {
+                    which: Which::TitleBar,
+                    left: ((w - tw) * 0.5).max(0.0),
+                    top: ((tb.height - line_h) * 0.5).max(0.0),
+                    bounds: [0, 0, w as i32, tb.height as i32],
+                    color: dim,
+                });
+            }
             if let Some(hint) = &state.hint {
                 let hw = hint.chars().count() as f32 * cw;
                 self.set_text(
@@ -490,6 +522,7 @@ impl Ui {
                         Which::Hint => &self.hint,
                         Which::Ghost => &self.ghost,
                         Which::Popup => &self.popup,
+                        Which::TitleBar => &self.title_bar,
                     };
                     TextArea {
                         buffer,
@@ -569,6 +602,28 @@ impl Ui {
                     [l[0], l[1], l[2], 1.0],
                 ));
             }
+        }
+        if let Some(tb) = &state.titlebar {
+            let c = to_lin(bg);
+            rects.push(OverlayInst::rect(
+                0.0,
+                0.0,
+                w,
+                tb.height,
+                [c[0], c[1], c[2], 1.0],
+            ));
+            let line = to_lin(if state.dark {
+                [0.10, 0.10, 0.10]
+            } else {
+                [0.77, 0.77, 0.77]
+            });
+            rects.push(OverlayInst::rect(
+                0.0,
+                tb.height - dpr,
+                w,
+                dpr,
+                [line[0], line[1], line[2], 1.0],
+            ));
         }
         if let Some(p) = &state.popup {
             let bar_top = h - self.bar_height;
