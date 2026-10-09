@@ -18,21 +18,33 @@ pub struct Gpu {
 }
 
 pub enum Acquired {
-    Frame(wgpu::SurfaceTexture),
-    /// Nothing to draw into right now (occluded, resizing). Try again later.
-    Skip,
+    Frame {
+        texture: wgpu::SurfaceTexture,
+        /// The surface still works but should be reconfigured *after* this
+        /// frame has been presented (reconfiguring now would invalidate it).
+        suboptimal: bool,
+    },
+    /// Nothing to draw into right now. The caller must try again.
+    Skip(&'static str),
 }
 
 impl Gpu {
     pub fn new(window: Arc<Window>, event_loop: &ActiveEventLoop, capture: bool) -> Result<Gpu> {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_with_display_handle(
-            Box::new(event_loop.owned_display_handle()),
-        ));
+        // WGPU_BACKEND=vulkan|gl and friends are honoured, which helps when a
+        // driver misbehaves.
+        let instance = wgpu::Instance::new(
+            wgpu::InstanceDescriptor::new_with_display_handle(Box::new(
+                event_loop.owned_display_handle(),
+            ))
+            .with_env(),
+        );
         let surface = instance
             .create_surface(window.clone())
             .context("cannot create a surface for the window")?;
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::LowPower,
+            // A reader does not need the discrete GPU; WGPU_POWER_PREF=high overrides.
+            power_preference:
+                wgpu::PowerPreference::from_env().unwrap_or(wgpu::PowerPreference::LowPower),
             force_fallback_adapter: false,
             compatible_surface: Some(&surface),
             apply_limit_buckets: false,
@@ -45,6 +57,12 @@ impl Gpu {
             info.device_type,
             info.backend
         );
+        if info.backend == wgpu::Backend::Gl {
+            log::warn!(
+                "using the OpenGL backend because no usable Vulkan driver was found; \
+                 if the window stays blank try WGPU_BACKEND=vulkan and check `vulkaninfo`"
+            );
+        }
 
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             label: Some("mizu"),
@@ -82,6 +100,16 @@ impl Gpu {
             desired_maximum_frame_latency: 2,
             color_space: wgpu::SurfaceColorSpace::Auto,
         };
+        log::info!(
+            "surface: {:?} {}x{} present {:?} alpha {:?} (available: {:?} / {:?})",
+            config.format,
+            config.width,
+            config.height,
+            config.present_mode,
+            config.alpha_mode,
+            caps.present_modes,
+            caps.alpha_modes
+        );
         surface.configure(&device, &config);
 
         Ok(Gpu {
@@ -116,28 +144,33 @@ impl Gpu {
     pub fn acquire(&mut self) -> Acquired {
         use wgpu::CurrentSurfaceTexture as C;
         match self.surface.get_current_texture() {
-            C::Success(f) => Acquired::Frame(f),
-            C::Suboptimal(f) => {
-                // Still presentable; reconfigure for the next frame.
-                self.surface.configure(&self.device, &self.config);
-                Acquired::Frame(f)
-            }
-            C::Timeout | C::Occluded => Acquired::Skip,
+            C::Success(texture) => Acquired::Frame {
+                texture,
+                suboptimal: false,
+            },
+            C::Suboptimal(texture) => Acquired::Frame {
+                texture,
+                suboptimal: true,
+            },
+            C::Timeout => Acquired::Skip("timeout"),
+            C::Occluded => Acquired::Skip("occluded"),
             C::Outdated => {
                 self.surface.configure(&self.device, &self.config);
-                Acquired::Skip
+                Acquired::Skip("outdated")
             }
             C::Lost => {
                 if let Ok(s) = self.instance.create_surface(self.window.clone()) {
                     self.surface = s;
                     self.surface.configure(&self.device, &self.config);
                 }
-                Acquired::Skip
+                Acquired::Skip("lost")
             }
-            C::Validation => {
-                log::error!("surface validation error");
-                Acquired::Skip
-            }
+            C::Validation => Acquired::Skip("validation error"),
         }
+    }
+
+    /// Reconfigure with the current settings (after a suboptimal frame).
+    pub fn reconfigure(&mut self) {
+        self.surface.configure(&self.device, &self.config);
     }
 }

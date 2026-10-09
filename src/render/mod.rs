@@ -170,6 +170,10 @@ pub struct FrameStats {
     pub stroke_instances: u32,
     pub tiles_cached: u32,
     pub tile_slots: u32,
+    /// Why nothing was drawn (the caller has to try again).
+    pub skipped: Option<&'static str>,
+    /// The frame was drawn but the swapchain needs another one soon.
+    pub redraw_soon: bool,
 }
 
 type KindMaker = fn(u16) -> BatchKind;
@@ -225,6 +229,7 @@ pub struct Renderer {
     buckets: [Vec<Vec<ImageInst>>; 3],
     capture_requested: bool,
     captured: Option<Capture>,
+    last_skip: Option<&'static str>,
 }
 
 /// A screenshot of the last frame (RGBA8, sRGB).
@@ -475,6 +480,7 @@ impl Renderer {
             buckets: [Vec::new(), Vec::new(), Vec::new()],
             capture_requested: false,
             captured: None,
+            last_skip: None,
         })
     }
 
@@ -834,9 +840,21 @@ impl Renderer {
 
     pub fn render(&mut self, input: &FrameInput) -> FrameStats {
         let mut stats = FrameStats::default();
-        let Acquired::Frame(frame) = self.gpu.acquire() else {
-            return stats;
+        let (frame, suboptimal) = match self.gpu.acquire() {
+            Acquired::Frame {
+                texture,
+                suboptimal,
+            } => (texture, suboptimal),
+            Acquired::Skip(reason) => {
+                if self.last_skip != Some(reason) {
+                    log::warn!("surface not ready ({reason}); retrying");
+                    self.last_skip = Some(reason);
+                }
+                stats.skipped = Some(reason);
+                return stats;
+            }
         };
+        self.last_skip = None;
         self.index.frame += 1;
         let [sw, sh] = self.gpu.size();
         let cam = input.camera;
@@ -1249,6 +1267,11 @@ impl Renderer {
             });
         }
         self.gpu.queue.present(frame);
+        if suboptimal {
+            // Safe now: the frame has been handed to the presentation engine.
+            self.gpu.reconfigure();
+            stats.redraw_soon = true;
+        }
         self.ui.end_frame();
 
         stats.tiles_cached = self.index.tiles.len() as u32;

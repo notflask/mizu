@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalPosition};
+use winit::event::StartCause;
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, TouchPhase, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoopProxy};
 use winit::keyboard::ModifiersState;
@@ -326,6 +327,12 @@ impl App {
                 }
                 _ => {}
             }
+            let input_cmd = matches!(
+                script.cmds.front(),
+                Some(
+                    Cmd::Keys(_) | Cmd::Move(..) | Cmd::Button(..) | Cmd::Wheel(..) | Cmd::Pinch(_)
+                )
+            );
             match script.cmds.pop_front() {
                 Some(Cmd::Keys(keys)) => {
                     for k in keys {
@@ -366,8 +373,12 @@ impl App {
                 }
                 _ => {}
             }
-            self.viewer.dirty = true;
-            self.redraw();
+            if input_cmd {
+                // Only real input forces a redraw; everything else has to wake
+                // the drawing code by itself, exactly as in normal use.
+                self.viewer.dirty = true;
+                self.redraw();
+            }
         }
         self.script = Some(script);
     }
@@ -553,6 +564,14 @@ impl ApplicationHandler<UserEvent> for App {
         }
     }
 
+    fn new_events(&mut self, _event_loop: &ActiveEventLoop, cause: StartCause) {
+        // A timer we asked for (zoom debounce, message expiry, frame retry)
+        // fired: nothing else will wake the drawing code.
+        if matches!(cause, StartCause::ResumeTimeReached { .. }) {
+            self.redraw();
+        }
+    }
+
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         if let Some(p) = &mut self.platform {
             p.pump();
@@ -609,7 +628,7 @@ impl App {
             let empty = crate::ink::Store::new(0);
             let layout = crate::view::Layout::default();
             let t0 = Instant::now();
-            renderer.render(&FrameInput {
+            let fs = renderer.render(&FrameInput {
                 camera: &v.camera,
                 layout: &layout,
                 tile_scale: v.camera.scale().max(0.01),
@@ -622,12 +641,13 @@ impl App {
                 current_page: 0,
             });
             self.stats.push(now, t0.elapsed().as_secs_f32() * 1000.0);
+            let retry = self.retry_after(&fs, now);
             self.finish_frame(
                 event_loop,
                 &window,
                 more,
                 tick.animating,
-                tick.wake,
+                [tick.wake, retry].into_iter().flatten().min(),
                 zoom_wake,
             );
             return;
@@ -649,14 +669,31 @@ impl App {
         let ms = t0.elapsed().as_secs_f32() * 1000.0;
         self.stats.push(now, ms);
         log::trace!("frame {ms:.2}ms {fs:?}");
+        let retry = self.retry_after(&fs, now);
         self.finish_frame(
             event_loop,
             &window,
             more,
             tick.animating,
-            tick.wake,
+            [tick.wake, retry].into_iter().flatten().min(),
             zoom_wake,
         );
+    }
+
+    /// A frame that could not be drawn (or left the swapchain stale) has to
+    /// be tried again, otherwise the window stays blank until the next input.
+    fn retry_after(&mut self, fs: &crate::render::FrameStats, now: Instant) -> Option<Instant> {
+        if fs.redraw_soon {
+            self.viewer.dirty = true;
+        }
+        match fs.skipped {
+            Some("outdated") | Some("lost") => {
+                self.viewer.dirty = true;
+                None
+            }
+            Some(_) => Some(now + Duration::from_millis(30)),
+            None => None,
+        }
     }
 
     fn finish_frame(
@@ -687,7 +724,12 @@ impl App {
         if more_uploads || animating || self.viewer.dirty {
             window.request_redraw();
         }
-        let next = [wake, zoom_wake].into_iter().flatten().min();
+        // The test driver has to keep polling even when nothing else is due.
+        let poll = self
+            .script
+            .is_some()
+            .then(|| Instant::now() + Duration::from_millis(15));
+        let next = [wake, zoom_wake, poll].into_iter().flatten().min();
         event_loop.set_control_flow(match next {
             Some(t) => ControlFlow::WaitUntil(t),
             None => ControlFlow::Wait,

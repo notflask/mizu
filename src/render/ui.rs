@@ -85,6 +85,17 @@ struct Area {
     color: [u8; 3],
 }
 
+/// Scripts and symbols DejaVu Sans Mono has glyphs for: Latin, Greek,
+/// Cyrillic, general punctuation, arrows, maths, box drawing and blocks.
+/// Anything else (CJK, Arabic, Hebrew, Thai, ...) needs system fonts.
+fn embedded_font_covers(c: char) -> bool {
+    let u = c as u32;
+    u <= 0x052F
+        || (0x1E00..=0x1FFF).contains(&u)
+        || (0x2000..=0x2BFF).contains(&u)
+        || (0xFB00..=0xFB06).contains(&u)
+}
+
 fn attrs() -> Attrs<'static> {
     Attrs::new().family(Family::Name(FONT_NAME))
 }
@@ -139,7 +150,7 @@ impl Ui {
         if !self.system_fonts_loaded
             && text
                 .chars()
-                .any(|c| (c as u32) > 0x24F && !c.is_whitespace())
+                .any(|c| !c.is_whitespace() && !embedded_font_covers(c))
         {
             self.font_system.db_mut().load_system_fonts();
             self.system_fonts_loaded = true;
