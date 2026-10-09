@@ -164,6 +164,14 @@ impl Keymaps {
         warnings
     }
 
+    /// True when `key` appears anywhere in a binding of `mode`.
+    pub fn uses_key(&self, mode: Mode, key: Key) -> bool {
+        self.table(mode)
+            .bindings
+            .keys()
+            .any(|seq| seq.contains(&key))
+    }
+
     fn table(&self, mode: Mode) -> &Table {
         match mode {
             Mode::Normal => &self.normal,

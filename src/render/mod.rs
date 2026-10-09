@@ -109,6 +109,26 @@ impl GrowBuf {
         }
         queue.write_buffer(&self.buf, 0, data);
     }
+
+    /// Like `write`, but only `data[from..]` changed since the last write.
+    fn write_tail(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, data: &[u8], from: usize) {
+        if data.len() as u64 > self.cap || from == 0 {
+            self.write(device, queue, data);
+        } else if from < data.len() {
+            queue.write_buffer(&self.buf, from as u64, &data[from..]);
+        }
+    }
+}
+
+/// The live stroke's instances, kept between frames so that drawing only
+/// adds the new segments.
+#[derive(Default)]
+struct LiveCache {
+    page: usize,
+    width: f32,
+    color: [u8; 3],
+    points: usize,
+    insts: Vec<StrokeInst>,
 }
 
 /// Ink of one page on the GPU.
@@ -212,6 +232,8 @@ pub struct Renderer {
     image_buf: GrowBuf,
     overlay_buf: GrowBuf,
     live_buf: GrowBuf,
+    live_cache: LiveCache,
+    uniform_scratch: Vec<u8>,
     page_ink: HashMap<usize, PageInk>,
     // cache
     tile_arrays: SlotArrays,
@@ -466,6 +488,8 @@ impl Renderer {
             image_buf,
             overlay_buf,
             live_buf,
+            live_cache: LiveCache::default(),
+            uniform_scratch: Vec::new(),
             page_ink: HashMap::new(),
             tile_arrays,
             thumb_arrays,
@@ -622,30 +646,7 @@ impl Renderer {
     }
 
     fn stroke_instances(s: &Stroke, out: &mut Vec<StrokeInst>) {
-        let c = [s.color[0], s.color[1], s.color[2], 255];
-        let r = |i: usize| match &s.pressure {
-            Some(p) => pressure_width(s.width, p.get(i).copied().unwrap_or(1.0)) * 0.5,
-            None => s.width * 0.5,
-        };
-        match s.points.len() {
-            0 => {}
-            1 => out.push(StrokeInst {
-                a: s.points[0],
-                b: s.points[0],
-                r: [r(0), r(0)],
-                color: c,
-            }),
-            n => {
-                for i in 0..n - 1 {
-                    out.push(StrokeInst {
-                        a: s.points[i],
-                        b: s.points[i + 1],
-                        r: [r(i), r(i + 1)],
-                        color: c,
-                    });
-                }
-            }
-        }
+        segment_instances(&s.points, s.pressure.as_deref(), s.width, s.color, 0, out);
     }
 
     /// Bring the GPU copy of a page's ink up to date.
@@ -826,19 +827,6 @@ impl Renderer {
         }
     }
 
-    fn live_instances(live: &LiveStroke, out: &mut Vec<StrokeInst>) {
-        let s = Stroke {
-            id: uuid::Uuid::nil(),
-            page: live.page,
-            points: live.points.to_vec(),
-            pressure: live.pressure.map(|p| p.to_vec()),
-            width: live.width,
-            color: live.color,
-            bbox: [0.0; 4],
-        };
-        Self::stroke_instances(&s, out);
-    }
-
     pub fn render(&mut self, input: &FrameInput) -> FrameStats {
         let mut stats = FrameStats::default();
         let (frame, suboptimal) = match self.gpu.acquire() {
@@ -937,24 +925,54 @@ impl Renderer {
                 self.page_u_bg =
                     Self::make_page_u_bg(&self.gpu.device, &self.page_u_bgl, &self.page_u_buf);
             }
-            let mut bytes = vec![0u8; self.page_us.len() * stride];
+            let bytes = &mut self.uniform_scratch;
+            bytes.clear();
+            bytes.resize(self.page_us.len() * stride, 0);
             for (i, u) in self.page_us.iter().enumerate() {
                 bytes[i * stride..i * stride + 16].copy_from_slice(bytemuck::bytes_of(u));
             }
-            self.gpu.queue.write_buffer(&self.page_u_buf.buf, 0, &bytes);
+            self.gpu.queue.write_buffer(&self.page_u_buf.buf, 0, bytes);
         }
 
         // Live stroke
         let mut live_count = 0u32;
         let mut live_uniform = None;
+        if input.live.is_none() {
+            self.live_cache.points = 0;
+        }
         if let Some(live) = &input.live {
-            self.stroke_scratch.clear();
-            Self::live_instances(live, &mut self.stroke_scratch);
-            live_count = self.stroke_scratch.len() as u32;
-            self.live_buf.write(
+            let c = &mut self.live_cache;
+            let n = live.points.len();
+            let fresh = c.page != live.page
+                || c.width != live.width
+                || c.color != live.color
+                || n < c.points
+                || c.points < 2;
+            // Points are never changed once recorded, so only segments
+            // ending at new points have to be added.
+            let first_seg = if fresh { 0 } else { c.points - 1 };
+            if fresh {
+                c.insts.clear();
+            }
+            let from = c.insts.len() * std::mem::size_of::<StrokeInst>();
+            segment_instances(
+                live.points,
+                live.pressure,
+                live.width,
+                live.color,
+                first_seg,
+                &mut c.insts,
+            );
+            c.page = live.page;
+            c.width = live.width;
+            c.color = live.color;
+            c.points = n;
+            live_count = c.insts.len() as u32;
+            self.live_buf.write_tail(
                 &self.gpu.device,
                 &self.gpu.queue,
-                bytemuck::cast_slice(&self.stroke_scratch),
+                bytemuck::cast_slice(&c.insts),
+                if fresh { 0 } else { from },
             );
             live_uniform = ink_draws
                 .iter()
@@ -1267,6 +1285,8 @@ impl Renderer {
                 rgba,
             });
         }
+        // Lets winit pace redraws to the compositor's frame callbacks (Wayland).
+        self.gpu.window.pre_present_notify();
         self.gpu.queue.present(frame);
         if suboptimal {
             // Safe now: the frame has been handed to the presentation engine.
@@ -1278,6 +1298,42 @@ impl Renderer {
         stats.tiles_cached = self.index.tiles.len() as u32;
         stats.tile_slots = self.tile_arrays.in_use() as u32;
         stats
+    }
+}
+
+/// Instances for the segments of a stroke, starting at segment `first`
+/// (a stroke of one point is a dot).
+fn segment_instances(
+    points: &[[f32; 2]],
+    pressure: Option<&[f32]>,
+    width: f32,
+    color: [u8; 3],
+    first: usize,
+    out: &mut Vec<StrokeInst>,
+) {
+    let c = [color[0], color[1], color[2], 255];
+    let r = |i: usize| match pressure {
+        Some(p) => pressure_width(width, p.get(i).copied().unwrap_or(1.0)) * 0.5,
+        None => width * 0.5,
+    };
+    match points.len() {
+        0 => {}
+        1 => out.push(StrokeInst {
+            a: points[0],
+            b: points[0],
+            r: [r(0), r(0)],
+            color: c,
+        }),
+        n => {
+            for i in first..n - 1 {
+                out.push(StrokeInst {
+                    a: points[i],
+                    b: points[i + 1],
+                    r: [r(i), r(i + 1)],
+                    color: c,
+                });
+            }
+        }
     }
 }
 

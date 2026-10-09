@@ -644,3 +644,33 @@ fn session_restores_position_and_marks() {
     assert!(v.dark);
     assert!(v.doc.as_ref().unwrap().marks.contains_key(&'b'));
 }
+
+#[test]
+fn digits_pick_palette_colours_in_light_mode() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut v = open(&sample(dir.path(), 2));
+    assert!(!v.dark);
+    keys(&mut v, "i2");
+    assert_eq!(v.mode, UiMode::Draw);
+    assert_eq!(v.pen_color, v.settings.palette[1]);
+    draw_stroke(&mut v, [300.0, 300.0], [400.0, 320.0]);
+    let d = v.doc.as_ref().unwrap();
+    let colour = d.ink.all().next().expect("a stroke").color;
+    assert_eq!(colour, v.settings.palette[1]);
+    keys(&mut v, "3");
+    assert_eq!(v.pen_color, v.settings.palette[2]);
+}
+
+#[test]
+fn non_latin_layout_uses_the_latin_key() {
+    use mizu::input::Key;
+    let dir = tempfile::tempdir().unwrap();
+    let mut v = open(&sample(dir.path(), 2));
+    // Ukrainian layout: the "i" key types "ш".
+    v.on_key_layout(Key::ch('ш'), Some(Key::ch('i')));
+    assert_eq!(v.mode, UiMode::Draw);
+    // Text entry keeps the real character.
+    keys(&mut v, "<Esc>:");
+    v.on_key_layout(Key::ch('ш'), Some(Key::ch('i')));
+    assert_eq!(v.line, "ш");
+}

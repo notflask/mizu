@@ -51,6 +51,8 @@ pub struct App {
     pub exit_error: Option<String>,
     diag: Option<Diag>,
     presented_once: bool,
+    /// Last cursor set on the window; setting it is a compositor request.
+    cursor_icon: Option<CursorIcon>,
 }
 
 /// `--diag`: reads back some frames and logs what they contain.
@@ -254,6 +256,7 @@ impl App {
             capture_enabled: script.is_some() || diag.is_some(),
             diag,
             presented_once: false,
+            cursor_icon: None,
             script,
             platform: None,
             pinch_pos: None,
@@ -543,8 +546,20 @@ impl ApplicationHandler<UserEvent> for App {
             WindowEvent::ModifiersChanged(m) => self.mods = m.state(),
             WindowEvent::KeyboardInput { event, .. } => {
                 if event.state == ElementState::Pressed {
-                    if let Some(key) = Key::from_winit(&event.logical_key, self.mods) {
-                        self.viewer.on_key(key);
+                    use winit::platform::modifier_supplement::KeyEventExtModifierSupplement;
+                    let unmodified = event.key_without_modifiers();
+                    log::debug!(
+                        "key {:?} (unmodified {:?}, physical {:?}, mods {:?})",
+                        event.logical_key,
+                        unmodified,
+                        event.physical_key,
+                        self.mods
+                    );
+                    if let Some(key) =
+                        Key::from_winit_layout(&event.logical_key, &unmodified, self.mods)
+                    {
+                        let latin = key.latin_fallback(&event.physical_key);
+                        self.viewer.on_key_layout(key, latin);
                         self.redraw();
                     }
                 }
@@ -690,7 +705,10 @@ impl App {
             renderer.clear_cache();
             self.cache_epoch = v.cache_epoch;
         }
-        let more = v.upload_staged(renderer, 8);
+        // Fewer uploads per frame while the view moves, so a burst of
+        // finished tiles at the start of a scroll cannot cost a frame.
+        let budget = if v.is_animating() { 4 } else { 8 };
+        let more = v.upload_staged(renderer, budget);
         let tick = v.tick(now);
         let zoom_wake = v.schedule_tiles(renderer, now);
         v.refresh_highlights();
@@ -768,7 +786,10 @@ impl App {
         }
         let ms = t0.elapsed().as_secs_f32() * 1000.0;
         self.stats.push(now, ms);
-        log::trace!("frame {ms:.2}ms {fs:?}");
+        log::trace!(
+            "frame {ms:.2}ms offset {:?} {fs:?}",
+            self.viewer.camera.offset
+        );
         let retry = self.retry_after(&fs, now);
         self.finish_frame(
             event_loop,
@@ -819,7 +840,10 @@ impl App {
         } else {
             CursorIcon::Default
         };
-        window.set_cursor(icon);
+        if self.cursor_icon != Some(icon) {
+            window.set_cursor(icon);
+            self.cursor_icon = Some(icon);
+        }
 
         if more_uploads || animating || self.viewer.dirty {
             window.request_redraw();

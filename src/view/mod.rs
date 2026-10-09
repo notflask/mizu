@@ -2,6 +2,7 @@
 
 pub mod camera;
 pub mod layout;
+pub mod spring;
 
 pub use camera::{Camera, ZoomMode};
 pub use layout::Layout;

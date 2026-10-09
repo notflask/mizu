@@ -26,9 +26,24 @@ const DRAG_THRESHOLD: f32 = 4.0;
 
 impl Viewer {
     pub fn on_key(&mut self, key: Key) {
+        self.on_key_layout(key, None);
+    }
+
+    /// `latin` is the same physical key on a US layout, used in Normal and
+    /// Draw mode when a non-Latin layout produced a key nothing is bound to.
+    pub fn on_key_layout(&mut self, key: Key, latin: Option<Key>) {
         match self.mode {
             UiMode::Normal | UiMode::Draw => {
                 self.message = None;
+                let mode = if self.mode == UiMode::Draw {
+                    Mode::Draw
+                } else {
+                    Mode::Normal
+                };
+                let key = match latin {
+                    Some(l) if !self.keymaps.uses_key(mode, key) => l,
+                    _ => key,
+                };
                 self.on_key_normal(key);
             }
             UiMode::Command | UiMode::Search { .. } => self.on_key_line(key),

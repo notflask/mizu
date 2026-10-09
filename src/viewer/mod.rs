@@ -25,6 +25,7 @@ use crate::render::tiles;
 use crate::render::ui::Ui;
 use crate::render::{Highlight, Theme};
 use crate::session::{FileState, Session};
+use crate::view::spring;
 use crate::view::{Camera, Layout, ZoomMode};
 use crate::watch::Watcher;
 
@@ -153,6 +154,11 @@ pub struct Viewer {
     zoom_changed_at: Option<Instant>,
     last_scale: f32,
     anim_target: Option<[f32; 2]>,
+    /// Velocity of the scroll spring (document units per second).
+    anim_vel: [f32; 2],
+    /// The previous tick advanced the animation (so `last_tick` is a real
+    /// frame interval).
+    anim_running: bool,
     last_tick: Instant,
     /// Anything changed that needs a redraw.
     pub dirty: bool,
@@ -221,6 +227,8 @@ impl Viewer {
             zoom_changed_at: None,
             last_scale: 0.0,
             anim_target: None,
+            anim_vel: [0.0; 2],
+            anim_running: false,
             last_tick: Instant::now(),
             dirty: true,
             cache_epoch: 0,
@@ -664,6 +672,10 @@ impl Viewer {
         None
     }
 
+    pub fn is_animating(&self) -> bool {
+        self.anim_target.is_some()
+    }
+
     /// True when everything visible is sharp and nothing is moving.
     pub fn view_complete(&self, renderer: &crate::render::Renderer) -> bool {
         if self.is_loading() || self.anim_target.is_some() || self.zoom_changed_at.is_some() {
@@ -700,10 +712,7 @@ impl Viewer {
     /// Advance animations and timers. Returns when to wake up next and whether
     /// an animation is running (then a redraw is needed right away).
     pub fn tick(&mut self, now: Instant) -> Tick {
-        let dt = now
-            .saturating_duration_since(self.last_tick)
-            .as_secs_f32()
-            .min(0.1);
+        let dt = now.saturating_duration_since(self.last_tick).as_secs_f32();
         self.last_tick = now;
         let mut animating = false;
         let mut wake: Option<Instant> = None;
@@ -712,16 +721,25 @@ impl Viewer {
         };
 
         if let Some(target) = self.anim_target {
-            let k = 1.0 - (-dt * 22.0).exp();
+            // After idle, the time since the last frame is meaningless.
+            let dt = if self.anim_running {
+                dt.min(spring::MAX_DT)
+            } else {
+                spring::FIRST_DT
+            };
             let s = self.camera.scale();
             let mut done = true;
-            for (off, tgt) in self.camera.offset.iter_mut().zip(target) {
-                let diff = tgt - *off;
-                if diff.abs() * s > 0.3 {
-                    *off += diff * k;
+            let axes = self.camera.offset.iter_mut().zip(&mut self.anim_vel);
+            for ((off, vel), tgt) in axes.zip(target) {
+                let (p, v) = spring::step(*off, *vel, tgt, dt, spring::OMEGA);
+                // Within a third of a pixel and nearly still: snap.
+                if (tgt - p).abs() * s > 0.3 || v.abs() * s > 30.0 {
+                    *off = p;
+                    *vel = v;
                     done = false;
                 } else {
                     *off = tgt;
+                    *vel = 0.0;
                 }
             }
             if done {
@@ -730,7 +748,10 @@ impl Viewer {
                 animating = true;
             }
             self.dirty = true;
+        } else {
+            self.anim_vel = [0.0; 2];
         }
+        self.anim_running = animating;
         if let Some(m) = &self.message {
             if now >= m.until {
                 self.message = None;
