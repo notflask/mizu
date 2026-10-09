@@ -72,7 +72,10 @@ impl Store {
     }
 
     pub fn strokes(&self, page: usize) -> &[Stroke] {
-        self.pages.get(page).map(|p| p.strokes.as_slice()).unwrap_or(&[])
+        self.pages
+            .get(page)
+            .map(|p| p.strokes.as_slice())
+            .unwrap_or(&[])
     }
 
     pub fn total(&self) -> usize {

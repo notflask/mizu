@@ -64,7 +64,10 @@ impl Stroke {
     pub fn mean_width(&self) -> f32 {
         match &self.pressure {
             Some(p) if !p.is_empty() => {
-                p.iter().map(|&v| pressure_width(self.width, v)).sum::<f32>() / p.len() as f32
+                p.iter()
+                    .map(|&v| pressure_width(self.width, v))
+                    .sum::<f32>()
+                    / p.len() as f32
             }
             _ => self.width,
         }
@@ -101,7 +104,13 @@ mod tests {
         assert!((pressure_width(2.0, 1.0) - 2.0).abs() < 1e-6);
         assert!((pressure_width(2.0, 0.0) - 0.5).abs() < 1e-6);
         assert!(pressure_width(2.0, 0.5) > pressure_width(2.0, 0.25));
-        let s = Stroke::new(0, vec![[0.0, 0.0], [1.0, 0.0]], Some(vec![0.0, 1.0]), 2.0, [0; 3]);
+        let s = Stroke::new(
+            0,
+            vec![[0.0, 0.0], [1.0, 0.0]],
+            Some(vec![0.0, 1.0]),
+            2.0,
+            [0; 3],
+        );
         assert!((s.width_at(0) - 0.5).abs() < 1e-6);
         assert!((s.width_at(1) - 2.0).abs() < 1e-6);
         assert!((s.mean_width() - 1.25).abs() < 1e-6);

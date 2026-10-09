@@ -329,17 +329,38 @@ mod tests {
 
     #[test]
     fn single_keys() {
-        assert_eq!(actions(&run(Mode::Normal, "jjk")), vec![Action::ScrollDown, Action::ScrollDown, Action::ScrollUp]);
+        assert_eq!(
+            actions(&run(Mode::Normal, "jjk")),
+            vec![Action::ScrollDown, Action::ScrollDown, Action::ScrollUp]
+        );
     }
 
     #[test]
     fn counts() {
         let out = run(Mode::Normal, "5j");
-        assert_eq!(out, vec![Fired { action: Action::ScrollDown, count: Some(5) }]);
+        assert_eq!(
+            out,
+            vec![Fired {
+                action: Action::ScrollDown,
+                count: Some(5)
+            }]
+        );
         let out = run(Mode::Normal, "42G");
-        assert_eq!(out, vec![Fired { action: Action::GotoLast, count: Some(42) }]);
+        assert_eq!(
+            out,
+            vec![Fired {
+                action: Action::GotoLast,
+                count: Some(42)
+            }]
+        );
         let out = run(Mode::Normal, "12gg");
-        assert_eq!(out, vec![Fired { action: Action::GotoFirst, count: Some(12) }]);
+        assert_eq!(
+            out,
+            vec![Fired {
+                action: Action::GotoFirst,
+                count: Some(12)
+            }]
+        );
         let out = run(Mode::Normal, "<C-d>");
         assert_eq!(out[0].count, None);
     }
@@ -369,16 +390,31 @@ mod tests {
 
     #[test]
     fn char_arguments() {
-        assert_eq!(actions(&run(Mode::Normal, "ma")), vec![Action::SetMark('a')]);
-        assert_eq!(actions(&run(Mode::Normal, "'b")), vec![Action::JumpMark('b')]);
+        assert_eq!(
+            actions(&run(Mode::Normal, "ma")),
+            vec![Action::SetMark('a')]
+        );
+        assert_eq!(
+            actions(&run(Mode::Normal, "'b")),
+            vec![Action::JumpMark('b')]
+        );
         // The key after `m` is the argument even when it is bound otherwise.
-        assert_eq!(actions(&run(Mode::Normal, "mj")), vec![Action::SetMark('j')]);
+        assert_eq!(
+            actions(&run(Mode::Normal, "mj")),
+            vec![Action::SetMark('j')]
+        );
     }
 
     #[test]
     fn escape_cancels() {
-        assert_eq!(actions(&run(Mode::Normal, "g<Esc>j")), vec![Action::ScrollDown]);
-        assert_eq!(actions(&run(Mode::Normal, "5<Esc>j")), vec![Action::ScrollDown]);
+        assert_eq!(
+            actions(&run(Mode::Normal, "g<Esc>j")),
+            vec![Action::ScrollDown]
+        );
+        assert_eq!(
+            actions(&run(Mode::Normal, "5<Esc>j")),
+            vec![Action::ScrollDown]
+        );
         assert_eq!(run(Mode::Normal, "5<Esc>j")[0].count, None);
     }
 

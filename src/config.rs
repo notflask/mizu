@@ -199,7 +199,8 @@ impl Settings {
         };
         match Settings::parse(&text) {
             Ok((s, warnings)) => {
-                let msg = (!warnings.is_empty()).then(|| format!("config: {}", warnings.join("; ")));
+                let msg =
+                    (!warnings.is_empty()).then(|| format!("config: {}", warnings.join("; ")));
                 (s, msg)
             }
             Err(e) => (Settings::default(), Some(format!("config: {e}"))),
@@ -246,7 +247,10 @@ mod tests {
         assert_eq!(s.dark_bg, [0x10, 0x10, 0x10]);
         assert_eq!(s.dark_separator, Some([0x22, 0x22, 0x22]));
         assert_eq!(s.palette.len(), 2);
-        assert_eq!(s.keys_normal.get("<C-n>").map(String::as_str), Some("toggle_dark"));
+        assert_eq!(
+            s.keys_normal.get("<C-n>").map(String::as_str),
+            Some("toggle_dark")
+        );
     }
 
     #[test]

@@ -58,8 +58,11 @@ impl Session {
         state.stamp = self.counter;
         self.files.insert(key_for(file), state);
         if self.files.len() > MAX_ENTRIES {
-            let mut stamps: Vec<(u64, String)> =
-                self.files.iter().map(|(k, v)| (v.stamp, k.clone())).collect();
+            let mut stamps: Vec<(u64, String)> = self
+                .files
+                .iter()
+                .map(|(k, v)| (v.stamp, k.clone()))
+                .collect();
             stamps.sort();
             let excess = self.files.len() - MAX_ENTRIES;
             for (_, k) in stamps.into_iter().take(excess) {
@@ -121,7 +124,8 @@ mod tests {
         let path = dir.path().join("session.json");
         s.save_to(&path).unwrap();
 
-        let loaded: Session = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let loaded: Session =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         let got = loaded.get(&file).unwrap();
         assert_eq!(got.page, 7);
         assert_eq!(got.marks.get(&'a'), Some(&(3, 12.5)));
@@ -136,7 +140,12 @@ mod tests {
         }
         assert_eq!(s.len(), MAX_ENTRIES);
         assert!(s.get(Path::new("/nonexistent/file-0.pdf")).is_none());
-        assert!(s.get(Path::new(&format!("/nonexistent/file-{}.pdf", MAX_ENTRIES + 19))).is_some());
+        assert!(s
+            .get(Path::new(&format!(
+                "/nonexistent/file-{}.pdf",
+                MAX_ENTRIES + 19
+            )))
+            .is_some());
     }
 
     #[test]
@@ -157,7 +166,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path().join("session.json");
         std::fs::write(&p, "not json").unwrap();
-        let loaded: Option<Session> = serde_json::from_str(&std::fs::read_to_string(&p).unwrap()).ok();
+        let loaded: Option<Session> =
+            serde_json::from_str(&std::fs::read_to_string(&p).unwrap()).ok();
         assert!(loaded.is_none());
     }
 }

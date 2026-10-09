@@ -74,7 +74,11 @@ pub struct Service {
 }
 
 impl Service {
-    pub fn spawn(path: PathBuf, password: Option<String>, wake: Arc<dyn Fn() + Send + Sync>) -> Service {
+    pub fn spawn(
+        path: PathBuf,
+        password: Option<String>,
+        wake: Arc<dyn Fn() + Send + Sync>,
+    ) -> Service {
         let (tx, jobs) = unbounded::<Job>();
         let (reply_tx, rx) = unbounded::<Reply>();
         let current_search = Arc::new(AtomicU64::new(0));
@@ -166,7 +170,8 @@ fn run(
                 send(Reply::SearchDone { id });
             }
             Job::Save { id, dst, strokes } => {
-                let result = super::annots::save_with_strokes(&path, &dst, password.as_deref(), &strokes);
+                let result =
+                    super::annots::save_with_strokes(&path, &dst, password.as_deref(), &strokes);
                 send(Reply::Saved { id, dst, result });
             }
             Job::Links { pages } => {
@@ -185,7 +190,12 @@ fn run(
 
 /// Search one page. MuPDF's search ignores case; for case-sensitive queries
 /// the hits are filtered against the page text.
-pub fn search_page(doc: &PdfDocument, page: usize, needle: &str, case_sensitive: bool) -> Vec<[f32; 4]> {
+pub fn search_page(
+    doc: &PdfDocument,
+    page: usize,
+    needle: &str,
+    case_sensitive: bool,
+) -> Vec<[f32; 4]> {
     let Ok(p) = doc.load_page(page as i32) else {
         return Vec::new();
     };
@@ -233,7 +243,11 @@ pub fn filter_case(rects: Vec<[f32; 4]>, text: &str, needle: &str) -> Vec<[f32; 
     let lower_needle = needle.to_lowercase();
     if lower_text.len() != text.len() || lower_needle.len() != needle.len() {
         // Case mapping changed byte lengths; do not try to be clever.
-        return if text.contains(&needle) { rects } else { Vec::new() };
+        return if text.contains(&needle) {
+            rects
+        } else {
+            Vec::new()
+        };
     }
     let mut exact = Vec::new();
     let mut from = 0;

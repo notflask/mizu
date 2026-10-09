@@ -22,7 +22,9 @@ pub fn is_mizu(a: &PdfAnnotation) -> bool {
     if !matches!(a.r#type(), Ok(PdfAnnotationType::Ink)) {
         return false;
     }
-    name_of(a).map(|n| n.starts_with(NM_PREFIX)).unwrap_or(false)
+    name_of(a)
+        .map(|n| n.starts_with(NM_PREFIX))
+        .unwrap_or(false)
 }
 
 fn name_of(a: &PdfAnnotation) -> Option<String> {
@@ -37,7 +39,8 @@ pub fn read_strokes(page_index: usize, page: &PdfPage) -> Vec<Stroke> {
             continue;
         }
         let Some(name) = name_of(&a) else { continue };
-        let id = Uuid::parse_str(name.trim_start_matches(NM_PREFIX)).unwrap_or_else(|_| Uuid::new_v4());
+        let id =
+            Uuid::parse_str(name.trim_start_matches(NM_PREFIX)).unwrap_or_else(|_| Uuid::new_v4());
         let Ok(lists) = a.ink_list() else { continue };
         let Some(first) = lists.into_iter().next() else {
             continue;
@@ -55,15 +58,11 @@ pub fn read_strokes(page_index: usize, page: &PdfPage) -> Vec<Stroke> {
             .or_else(|| a.border_width().ok())
             .filter(|w| w.is_finite() && *w > 0.0)
             .unwrap_or(1.5);
-        let pressure = obj
-            .get_dict("MizuP")
-            .ok()
-            .flatten()
-            .and_then(|arr| {
-                let it = arr.array_iter().ok()?;
-                let v: Vec<f32> = it.filter_map(|o| o.ok()?.as_float().ok()).collect();
-                (v.len() == points.len()).then_some(v)
-            });
+        let pressure = obj.get_dict("MizuP").ok().flatten().and_then(|arr| {
+            let it = arr.array_iter().ok()?;
+            let v: Vec<f32> = it.filter_map(|o| o.ok()?.as_float().ok()).collect();
+            (v.len() == points.len()).then_some(v)
+        });
         let color = match a.color() {
             Ok(Some(AnnotationColor::Rgb { red, green, blue })) => [
                 (red * 255.0).round().clamp(0.0, 255.0) as u8,
@@ -159,7 +158,11 @@ fn real_array(doc: &PdfDocument, vals: &[f32]) -> Result<PdfObject, mupdf::Error
 }
 
 /// Append `stroke` to `page` as an ink annotation.
-pub fn write_stroke(doc: &mut PdfDocument, page: &mut PdfPage, s: &Stroke) -> Result<(), mupdf::Error> {
+pub fn write_stroke(
+    doc: &mut PdfDocument,
+    page: &mut PdfPage,
+    s: &Stroke,
+) -> Result<(), mupdf::Error> {
     let pts = s.points.iter().map(|p| Point { x: p[0], y: p[1] });
     let mut a = page.add_ink_annotation([pts])?;
     a.set_color(AnnotationColor::Rgb {
@@ -170,7 +173,10 @@ pub fn write_stroke(doc: &mut PdfDocument, page: &mut PdfPage, s: &Stroke) -> Re
     a.set_border_width(s.mean_width())?;
     a.set_author("mizu")?;
     let mut obj = a.object();
-    obj.dict_put("NM", PdfObject::new_string(&format!("{NM_PREFIX}{}", s.id))?)?;
+    obj.dict_put(
+        "NM",
+        PdfObject::new_string(&format!("{NM_PREFIX}{}", s.id))?,
+    )?;
     obj.dict_put("MizuW", PdfObject::new_real(s.width)?)?;
     if let Some(p) = &s.pressure {
         obj.dict_put("MizuP", real_array(doc, p)?)?;
@@ -179,7 +185,10 @@ pub fn write_stroke(doc: &mut PdfDocument, page: &mut PdfPage, s: &Stroke) -> Re
 
     if s.pressure.is_some() {
         // Replace the generated appearance with the pressure shape.
-        let inv = page.ctm()?.invert().ok_or(mupdf::Error::NonInvertibleMatrix)?;
+        let inv = page
+            .ctm()?
+            .invert()
+            .ok_or(mupdf::Error::NonInvertibleMatrix)?;
         let polys = stroke_polygons(s);
         let mut content = String::with_capacity(polys.len() * 120);
         content.push_str(&format!(
@@ -196,14 +205,18 @@ pub fn write_stroke(doc: &mut PdfDocument, page: &mut PdfPage, s: &Stroke) -> Re
                 bb[1] = bb[1].min(y);
                 bb[2] = bb[2].max(x);
                 bb[3] = bb[3].max(y);
-                content.push_str(&format!("{x:.3} {y:.3} {}\n", if k == 0 { "m" } else { "l" }));
+                content.push_str(&format!(
+                    "{x:.3} {y:.3} {}\n",
+                    if k == 0 { "m" } else { "l" }
+                ));
             }
             content.push_str("h\n");
         }
         content.push_str("f\n");
         let bbox = [bb[0] - 0.5, bb[1] - 0.5, bb[2] + 0.5, bb[3] + 0.5];
         let mut buf = Buffer::with_capacity(content.len());
-        buf.write_all(content.as_bytes()).map_err(|_| mupdf::Error::InvalidUtf8)?;
+        buf.write_all(content.as_bytes())
+            .map_err(|_| mupdf::Error::InvalidUtf8)?;
         let mut dict = doc.new_dict()?;
         dict.dict_put("Type", PdfObject::new_name("XObject")?)?;
         dict.dict_put("Subtype", PdfObject::new_name("Form")?)?;
@@ -248,13 +261,20 @@ pub fn save_with_strokes(
         }
     }
 
-    let dir = dst.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or_else(|| Path::new("."));
+    let dir = dst
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
     let tmp = tempfile::Builder::new()
         .prefix(".mizu-save-")
         .suffix(".pdf")
         .tempfile_in(dir)
         .map_err(|e| format!("cannot write next to {}: {e}", dst.display()))?;
-    let tmp_path = tmp.path().to_str().ok_or("path is not valid UTF-8")?.to_string();
+    let tmp_path = tmp
+        .path()
+        .to_str()
+        .ok_or("path is not valid UTF-8")?
+        .to_string();
     doc.save(&tmp_path).map_err(|e| e.to_string())?;
     if let Ok(f) = std::fs::File::open(tmp.path()) {
         let _ = f.sync_all();
@@ -282,15 +302,27 @@ mod tests {
         let polys = stroke_polygons(&s);
         assert!(polys.len() >= 4 + 3);
         for p in &polys {
-            assert!(signed_area(p) > 0.0, "all polygons must be counter-clockwise");
+            assert!(
+                signed_area(p) > 0.0,
+                "all polygons must be counter-clockwise"
+            );
         }
     }
 
     #[test]
     fn polygon_radius_follows_pressure() {
-        let s = Stroke::new(0, vec![[0.0, 0.0], [100.0, 0.0]], Some(vec![0.0, 1.0]), 4.0, [0; 3]);
+        let s = Stroke::new(
+            0,
+            vec![[0.0, 0.0], [100.0, 0.0]],
+            Some(vec![0.0, 1.0]),
+            4.0,
+            [0; 3],
+        );
         let polys = stroke_polygons(&s);
-        let extent = |p: &Vec<[f32; 2]>| p.iter().map(|q| q[0]).fold(f32::MIN, f32::max) - p.iter().map(|q| q[0]).fold(f32::MAX, f32::min);
+        let extent = |p: &Vec<[f32; 2]>| {
+            p.iter().map(|q| q[0]).fold(f32::MIN, f32::max)
+                - p.iter().map(|q| q[0]).fold(f32::MAX, f32::min)
+        };
         assert!(extent(&polys[0]) < extent(&polys[1]));
     }
 }

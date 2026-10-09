@@ -26,6 +26,8 @@ pub struct History {
     /// Length of the undo stack at the time of the last save; `None` once
     /// the saved state is no longer reachable.
     saved_len: Option<usize>,
+    /// Bumped by every change; lets an async save notice later edits.
+    revision: u64,
 }
 
 impl Default for History {
@@ -34,6 +36,7 @@ impl Default for History {
             undo: Vec::new(),
             redo: Vec::new(),
             saved_len: Some(0),
+            revision: 0,
         }
     }
 }
@@ -41,6 +44,10 @@ impl Default for History {
 impl History {
     pub fn is_dirty(&self) -> bool {
         self.saved_len != Some(self.undo.len())
+    }
+
+    pub fn revision(&self) -> u64 {
+        self.revision
     }
 
     pub fn mark_saved(&mut self) {
@@ -57,6 +64,7 @@ impl History {
         }
         self.redo.clear();
         self.undo.push(edit);
+        self.revision += 1;
     }
 
     pub fn add_stroke(&mut self, store: &mut Store, stroke: Stroke) {
@@ -73,25 +81,32 @@ impl History {
                 removed.push(r);
             }
         }
-        if removed.is_empty() {
+        self.record_removed(removed)
+    }
+
+    /// Record strokes that were already taken out of the store (one eraser
+    /// drag, possibly across pages) as a single undo step. Each entry holds
+    /// the index the stroke had *at the time it was removed*, in removal
+    /// order. Returns the number of strokes.
+    pub fn record_removed(&mut self, removed: Vec<(usize, Stroke)>) -> usize {
+        let n = removed.len();
+        if n == 0 {
             return 0;
         }
-        // `removed` holds indices relative to the state after the previous
-        // removals. Convert each to the state before the first removal so
-        // that undo can re-insert in ascending order.
-        let n = removed.len();
+        // Convert every index to the state before the first removal on its
+        // page, so that undo can re-insert in ascending order.
         let raw: Vec<usize> = removed.iter().map(|(i, _)| *i).collect();
         let mut orig: Vec<(usize, Stroke)> = Vec::with_capacity(n);
-        for (i, (_, s)) in removed.into_iter().enumerate() {
+        for (i, (_, s)) in removed.iter().enumerate() {
             let mut x = raw[i];
             for j in (0..i).rev() {
-                if x >= raw[j] {
+                if removed[j].1.page == s.page && x >= raw[j] {
                     x += 1;
                 }
             }
-            orig.push((x, s));
+            orig.push((x, s.clone()));
         }
-        orig.sort_by_key(|(i, _)| *i);
+        orig.sort_by_key(|(i, s)| (s.page, *i));
         self.record(Edit::Remove(orig));
         n
     }
@@ -111,6 +126,7 @@ impl History {
             }
         }
         self.redo.push(edit);
+        self.revision += 1;
         page
     }
 
@@ -126,6 +142,7 @@ impl History {
             }
         }
         self.undo.push(edit);
+        self.revision += 1;
         page
     }
 
@@ -182,7 +199,10 @@ mod tests {
         assert_eq!(ids, order);
         h.redo(&mut st);
         assert_eq!(st.total(), 3);
-        assert!(!st.strokes(0).iter().any(|s| s.id == order[1] || s.id == order[3]));
+        assert!(!st
+            .strokes(0)
+            .iter()
+            .any(|s| s.id == order[1] || s.id == order[3]));
     }
 
     #[test]
@@ -236,6 +256,46 @@ mod tests {
         h.add_stroke(&mut st, line(3.0)); // new branch, len 1
         h.add_stroke(&mut st, line(4.0)); // len 2, but different content
         assert!(h.is_dirty());
+    }
+
+    #[test]
+    fn one_drag_across_pages_is_one_step() {
+        let mut st = Store::new(2);
+        let mut h = History::default();
+        let mk =
+            |page: usize, y: f32| Stroke::new(page, vec![[0.0, y], [10.0, y]], None, 1.0, [0; 3]);
+        let strokes = vec![mk(0, 1.0), mk(1, 1.0), mk(0, 2.0), mk(1, 2.0)];
+        let ids: Vec<_> = strokes.iter().map(|s| (s.page, s.id)).collect();
+        for s in strokes {
+            h.add_stroke(&mut st, s);
+        }
+        let order0: Vec<_> = st.strokes(0).iter().map(|s| s.id).collect();
+        let order1: Vec<_> = st.strokes(1).iter().map(|s| s.id).collect();
+        // Erase the first stroke of each page, then the second of page 0.
+        let mut removed = Vec::new();
+        for (page, id) in [ids[0], ids[1], ids[2]] {
+            removed.push(st.remove_by_id(page, id).unwrap());
+        }
+        assert_eq!(h.record_removed(removed), 3);
+        assert_eq!(st.total(), 1);
+        h.undo(&mut st);
+        let back0: Vec<_> = st.strokes(0).iter().map(|s| s.id).collect();
+        let back1: Vec<_> = st.strokes(1).iter().map(|s| s.id).collect();
+        assert_eq!(back0, order0);
+        assert_eq!(back1, order1);
+    }
+
+    #[test]
+    fn revision_changes_with_every_edit() {
+        let mut st = Store::new(1);
+        let mut h = History::default();
+        let r0 = h.revision();
+        h.add_stroke(&mut st, line(1.0));
+        let r1 = h.revision();
+        h.undo(&mut st);
+        let r2 = h.revision();
+        h.redo(&mut st);
+        assert!(r0 < r1 && r1 < r2 && r2 < h.revision());
     }
 
     #[test]

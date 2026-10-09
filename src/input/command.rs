@@ -4,12 +4,19 @@ use std::path::{Path, PathBuf};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Command {
-    Write { path: Option<PathBuf> },
-    Quit { force: bool },
+    Write {
+        path: Option<PathBuf>,
+    },
+    Quit {
+        force: bool,
+    },
     WriteQuit,
     /// `:x`: write only when something changed, then quit.
     Exit,
-    Edit { path: Option<PathBuf>, force: bool },
+    Edit {
+        path: Option<PathBuf>,
+        force: bool,
+    },
     Goto(usize),
     Dark,
     Light,
@@ -51,9 +58,10 @@ pub fn parse(line: &str) -> Result<Option<Command>, String> {
         },
         "dark" => Command::Dark,
         "light" => Command::Light,
-        "color" | "colour" => Command::Color(parse_hex(rest).ok_or_else(|| {
-            "E474: Invalid argument: expected #rrggbb".to_string()
-        })?),
+        "color" | "colour" => Command::Color(
+            parse_hex(rest)
+                .ok_or_else(|| "E474: Invalid argument: expected #rrggbb".to_string())?,
+        ),
         "width" => {
             let w: f32 = rest
                 .parse()
@@ -175,18 +183,32 @@ mod tests {
     fn paths() {
         assert_eq!(
             parse("w out.pdf").unwrap(),
-            Some(Command::Write { path: Some(PathBuf::from("out.pdf")) })
+            Some(Command::Write {
+                path: Some(PathBuf::from("out.pdf"))
+            })
         );
         assert_eq!(
             parse("e! /tmp/a b.pdf").unwrap(),
-            Some(Command::Edit { path: Some(PathBuf::from("/tmp/a b.pdf")), force: true })
+            Some(Command::Edit {
+                path: Some(PathBuf::from("/tmp/a b.pdf")),
+                force: true
+            })
         );
-        assert_eq!(parse("e!").unwrap(), Some(Command::Edit { path: None, force: true }));
+        assert_eq!(
+            parse("e!").unwrap(),
+            Some(Command::Edit {
+                path: None,
+                force: true
+            })
+        );
     }
 
     #[test]
     fn pen_commands() {
-        assert_eq!(parse("color #ff8000").unwrap(), Some(Command::Color([255, 128, 0])));
+        assert_eq!(
+            parse("color #ff8000").unwrap(),
+            Some(Command::Color([255, 128, 0]))
+        );
         assert_eq!(parse("width 2.5").unwrap(), Some(Command::Width(2.5)));
         assert!(parse("color red").is_err());
         assert!(parse("width -1").is_err());

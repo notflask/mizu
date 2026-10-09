@@ -102,7 +102,8 @@ impl Camera {
             ZoomMode::Free => {}
             ZoomMode::FitWidth => {
                 if layout.width > 0.0 {
-                    self.zoom = (self.viewport[0] / self.dpr / layout.width).clamp(MIN_ZOOM, MAX_ZOOM);
+                    self.zoom =
+                        (self.viewport[0] / self.dpr / layout.width).clamp(MIN_ZOOM, MAX_ZOOM);
                 }
             }
             ZoomMode::FitPage => {
@@ -115,13 +116,20 @@ impl Camera {
         }
     }
 
-    /// Keep the view inside the document. Small content is centred.
-    pub fn clamp(&mut self, layout: &Layout) {
+    /// `offset` limited to the document. Small content is centred.
+    pub fn clamped(&self, layout: &Layout, offset: [f32; 2]) -> [f32; 2] {
         let s = self.scale();
         let view_w = self.viewport[0] / s;
         let view_h = self.viewport[1] / s;
-        self.offset[0] = clamp_axis(self.offset[0], layout.width, view_w);
-        self.offset[1] = clamp_axis(self.offset[1], layout.height, view_h);
+        [
+            clamp_axis(offset[0], layout.width, view_w),
+            clamp_axis(offset[1], layout.height, view_h),
+        ]
+    }
+
+    /// Keep the view inside the document.
+    pub fn clamp(&mut self, layout: &Layout) {
+        self.offset = self.clamped(layout, self.offset);
     }
 
     /// Document y of the viewport centre.

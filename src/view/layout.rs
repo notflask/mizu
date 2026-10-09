@@ -64,7 +64,9 @@ impl Layout {
             return 0;
         }
         // First page whose bottom is below y.
-        let idx = self.pages.partition_point(|p| p.bottom() + PAGE_GAP * 0.5 <= y);
+        let idx = self
+            .pages
+            .partition_point(|p| p.bottom() + PAGE_GAP * 0.5 <= y);
         idx.min(self.pages.len() - 1)
     }
 

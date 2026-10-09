@@ -87,7 +87,9 @@ pub struct Pool {
 }
 
 pub fn worker_count() -> usize {
-    let cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(2);
+    let cores = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(2);
     cores.saturating_sub(1).clamp(1, 4)
 }
 
@@ -285,8 +287,10 @@ impl WorkerCtx {
                         )?;
                         let mut data = self.buffer();
                         data.copy_from_slice(pixmap.samples());
-                        let vw = (w as i64 - k.tx as i64 * TILE as i64).clamp(0, TILE as i64) as u16;
-                        let vh = (h as i64 - k.ty as i64 * TILE as i64).clamp(0, TILE as i64) as u16;
+                        let vw =
+                            (w as i64 - k.tx as i64 * TILE as i64).clamp(0, TILE as i64) as u16;
+                        let vh =
+                            (h as i64 - k.ty as i64 * TILE as i64).clamp(0, TILE as i64) as u16;
                         Ok(Rendered::Tile(TilePixels {
                             key: *k,
                             w: vw,
@@ -338,7 +342,13 @@ fn build_page(doc: &PdfDocument, index: usize) -> Result<CachedPage, String> {
 
 /// Render the page at scale `s` into `pixmap` (white background), shifted by
 /// `(dx, dy)` device pixels. Returns the full page size in pixels.
-fn render_into(pixmap: &mut Pixmap, cp: &CachedPage, s: f32, dx: f32, dy: f32) -> Result<(u32, u32), String> {
+fn render_into(
+    pixmap: &mut Pixmap,
+    cp: &CachedPage,
+    s: f32,
+    dx: f32,
+    dy: f32,
+) -> Result<(u32, u32), String> {
     pixmap.clear_with(255).map_err(|e| e.to_string())?;
     let ctm = Matrix::new(s, 0.0, 0.0, s, -cp.x0 * s + dx, -cp.y0 * s + dy);
     let dev = Device::from_pixmap(pixmap).map_err(|e| e.to_string())?;

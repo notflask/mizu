@@ -53,7 +53,8 @@ fn missing_and_garbage_files_fail_cleanly() {
 }
 
 fn wait_for<T>(rx: &crossbeam_channel::Receiver<T>, secs: u64) -> T {
-    rx.recv_timeout(Duration::from_secs(secs)).expect("timed out waiting for worker")
+    rx.recv_timeout(Duration::from_secs(secs))
+        .expect("timed out waiting for worker")
 }
 
 #[test]
@@ -90,8 +91,15 @@ fn pool_renders_tiles_with_content() {
                 // The page has a blue bar at y=20..50 (pdf space) -> near the
                 // bottom of a 1200 px page, so look for any blue pixel in the
                 // lower tiles; here just verify the tile is not blank white.
-                let non_white = t.data.chunks_exact(4).filter(|p| p[0] < 250 || p[1] < 250).count();
-                assert!(non_white > 100, "tile looks blank ({non_white} dark pixels)");
+                let non_white = t
+                    .data
+                    .chunks_exact(4)
+                    .filter(|p| p[0] < 250 || p[1] < 250)
+                    .count();
+                assert!(
+                    non_white > 100,
+                    "tile looks blank ({non_white} dark pixels)"
+                );
                 // alpha is opaque everywhere
                 assert!(t.data.chunks_exact(4).all(|p| p[3] == 255));
                 pool.recycle(t.data);
@@ -129,7 +137,9 @@ fn edge_tiles_report_valid_size() {
 }
 
 fn pen(page: usize, y: f32, pressure: bool) -> Stroke {
-    let pts: Vec<[f32; 2]> = (0..12).map(|i| [50.0 + i as f32 * 10.0, y + (i as f32 * 0.7).sin() * 8.0]).collect();
+    let pts: Vec<[f32; 2]> = (0..12)
+        .map(|i| [50.0 + i as f32 * 10.0, y + (i as f32 * 0.7).sin() * 8.0])
+        .collect();
     let pr = pressure.then(|| (0..12).map(|i| 0.2 + 0.07 * i as f32).collect());
     Stroke::new(page, pts, pr, 2.0, [0xe0, 0x31, 0x31])
 }
@@ -138,7 +148,12 @@ fn pen(page: usize, y: f32, pressure: bool) -> Stroke {
 fn strokes_survive_save_and_load_including_rotated_pages() {
     let dir = tempfile::tempdir().unwrap();
     let path = sample(dir.path());
-    let strokes = vec![pen(0, 100.0, false), pen(1, 200.0, true), pen(2, 150.0, false), pen(2, 300.0, true)];
+    let strokes = vec![
+        pen(0, 100.0, false),
+        pen(1, 200.0, true),
+        pen(2, 150.0, false),
+        pen(2, 300.0, true),
+    ];
     annots::save_with_strokes(&path, &path, None, &strokes).unwrap();
 
     let info = doc::load(&path, None).unwrap();
@@ -152,7 +167,11 @@ fn strokes_survive_save_and_load_including_rotated_pages() {
         assert_eq!(got.page, orig.page);
         assert_eq!(got.points.len(), orig.points.len());
         for (a, b) in got.points.iter().zip(&orig.points) {
-            assert!((a[0] - b[0]).abs() < 0.05 && (a[1] - b[1]).abs() < 0.05, "page {}: {a:?} vs {b:?}", orig.page);
+            assert!(
+                (a[0] - b[0]).abs() < 0.05 && (a[1] - b[1]).abs() < 0.05,
+                "page {}: {a:?} vs {b:?}",
+                orig.page
+            );
         }
         assert_eq!(got.color, orig.color);
         assert!((got.width - orig.width).abs() < 1e-3);
@@ -204,7 +223,13 @@ fn mizu_strokes_are_not_rendered_by_mupdf_but_foreign_annots_are() {
     let dir = tempfile::tempdir().unwrap();
     let path = sample(dir.path());
     // A huge, fully black stroke: if MuPDF drew it the tile would be black.
-    let big = Stroke::new(0, vec![[0.0, 300.0], [400.0, 300.0]], None, 400.0, [0, 0, 0]);
+    let big = Stroke::new(
+        0,
+        vec![[0.0, 300.0], [400.0, 300.0]],
+        None,
+        400.0,
+        [0, 0, 0],
+    );
     annots::save_with_strokes(&path, &path, None, &[big]).unwrap();
     let pool = Pool::spawn(path, None, Arc::new(|| {}), 1);
     let key = TileKey {
@@ -216,10 +241,17 @@ fn mizu_strokes_are_not_rendered_by_mupdf_but_foreign_annots_are() {
     pool.set_wanted(vec![key], vec![]);
     match wait_for(&pool.rx, 20) {
         Rendered::Tile(t) => {
-            let black = t.data.chunks_exact(4).filter(|p| p[0] < 20 && p[1] < 20 && p[2] < 20).count();
+            let black = t
+                .data
+                .chunks_exact(4)
+                .filter(|p| p[0] < 20 && p[1] < 20 && p[2] < 20)
+                .count();
             // Only the text may be dark; a rendered 400pt-wide stroke would
             // cover > 100k pixels.
-            assert!(black < 20_000, "mizu stroke leaked into the MuPDF render ({black})");
+            assert!(
+                black < 20_000,
+                "mizu stroke leaked into the MuPDF render ({black})"
+            );
         }
         _ => panic!("expected tile"),
     }
@@ -278,14 +310,23 @@ fn links_are_resolved() {
     match wait_for(&svc.rx, 20) {
         Reply::Links { page: 0, links } => {
             assert_eq!(links.len(), 2);
-            assert!(links.iter().any(|l| matches!(l.target, LinkTarget::Page { page: 1, .. })));
             assert!(links
                 .iter()
-                .any(|l| matches!(&l.target, LinkTarget::Uri(u) if u.starts_with("https://example.org"))));
+                .any(|l| matches!(l.target, LinkTarget::Page { page: 1, .. })));
+            assert!(links.iter().any(
+                |l| matches!(&l.target, LinkTarget::Uri(u) if u.starts_with("https://example.org"))
+            ));
             // Rect from the PDF is [20 20 120 60] in y-up space; on a 600 pt
             // tall page that is y 540..580 in page space.
-            let l = links.iter().find(|l| matches!(l.target, LinkTarget::Page { .. })).unwrap();
-            assert!((l.rect[1] - 540.0).abs() < 1.0 && (l.rect[3] - 580.0).abs() < 1.0, "{:?}", l.rect);
+            let l = links
+                .iter()
+                .find(|l| matches!(l.target, LinkTarget::Page { .. }))
+                .unwrap();
+            assert!(
+                (l.rect[1] - 540.0).abs() < 1.0 && (l.rect[3] - 580.0).abs() < 1.0,
+                "{:?}",
+                l.rect
+            );
         }
         _ => panic!("expected links"),
     }

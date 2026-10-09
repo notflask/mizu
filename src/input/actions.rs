@@ -180,7 +180,10 @@ mod tests {
     fn names_roundtrip() {
         assert_eq!(Action::from_name("toggle_dark"), Some(Action::ToggleDark));
         assert_eq!(Action::from_name("none"), Some(Action::None));
-        assert_eq!(Action::from_name("select_color_3"), Some(Action::SelectColor(3)));
+        assert_eq!(
+            Action::from_name("select_color_3"),
+            Some(Action::SelectColor(3))
+        );
         assert_eq!(Action::from_name("select_color_0"), Option::None);
         assert_eq!(Action::from_name("nope"), Option::None);
     }

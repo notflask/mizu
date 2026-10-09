@@ -63,8 +63,14 @@ pub fn make_pdf(pages: &[PageSpec], extras: &Extras) -> Vec<u8> {
     }
     catalog.push_str(" >>");
     objs.push((1, catalog.into_bytes()));
-    objs.push((2, format!("<< /Type /Pages /Kids [{kids}] /Count {n} >>").into_bytes()));
-    objs.push((3, b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_vec()));
+    objs.push((
+        2,
+        format!("<< /Type /Pages /Kids [{kids}] /Count {n} >>").into_bytes(),
+    ));
+    objs.push((
+        3,
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_vec(),
+    ));
 
     for (i, p) in pages.iter().enumerate() {
         let mut dict = format!(
@@ -92,7 +98,12 @@ pub fn make_pdf(pages: &[PageSpec], extras: &Extras) -> Vec<u8> {
         );
         objs.push((
             content_obj(i),
-            format!("<< /Length {} >>\nstream\n{}\nendstream", content.len(), content).into_bytes(),
+            format!(
+                "<< /Length {} >>\nstream\n{}\nendstream",
+                content.len(),
+                content
+            )
+            .into_bytes(),
         ));
     }
     if let Some(root) = outline_root {
@@ -154,13 +165,19 @@ pub fn make_pdf(pages: &[PageSpec], extras: &Extras) -> Vec<u8> {
         out.extend_from_slice(format!("{off:010} 00000 n \n").as_bytes());
     }
     out.extend_from_slice(
-        format!("trailer\n<< /Size {next} /Root 1 0 R >>\nstartxref\n{xref_at}\n%%EOF\n").as_bytes(),
+        format!("trailer\n<< /Size {next} /Root 1 0 R >>\nstartxref\n{xref_at}\n%%EOF\n")
+            .as_bytes(),
     );
     out
 }
 
 /// Write a generated PDF into `dir` and return its path.
-pub fn write_pdf(dir: &std::path::Path, name: &str, pages: &[PageSpec], extras: &Extras) -> std::path::PathBuf {
+pub fn write_pdf(
+    dir: &std::path::Path,
+    name: &str,
+    pages: &[PageSpec],
+    extras: &Extras,
+) -> std::path::PathBuf {
     let path = dir.join(name);
     std::fs::write(&path, make_pdf(pages, extras)).expect("write fixture");
     path

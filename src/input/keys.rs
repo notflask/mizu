@@ -211,7 +211,9 @@ fn parse_bracketed(inner: &str) -> Result<Key, String> {
         if lower.starts_with("c-") && rest.len() > 2 {
             mods.ctrl = true;
             rest = &rest[2..];
-        } else if lower.starts_with("a-") && rest.len() > 2 || lower.starts_with("m-") && rest.len() > 2 {
+        } else if lower.starts_with("a-") && rest.len() > 2
+            || lower.starts_with("m-") && rest.len() > 2
+        {
             mods.alt = true;
             rest = &rest[2..];
         } else if lower.starts_with("s-") && rest.len() > 2 {
