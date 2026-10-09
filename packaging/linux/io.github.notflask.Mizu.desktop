@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=mizu
+GenericName=PDF Viewer
+Comment=A minimal PDF viewer with Vim keys, a dark mode for the page, and ink
+Exec=mizu %f
+Icon=io.github.notflask.Mizu
+Terminal=false
+Categories=Office;Viewer;
+MimeType=application/pdf;
+StartupWMClass=io.github.notflask.Mizu
+Keywords=pdf;viewer;reader;vim;

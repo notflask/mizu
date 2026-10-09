@@ -330,6 +330,14 @@ impl App {
                 Some(Cmd::Pinch(d)) => self.viewer.on_pinch(d, None),
                 Some(Cmd::Dump) => {
                     let v = &self.viewer;
+                    if let Some(r) = &self.renderer {
+                        eprintln!(
+                            "COMPLETE={} loading={} dirty={}",
+                            v.view_complete(r),
+                            v.is_loading(),
+                            v.dirty
+                        );
+                    }
                     eprintln!(
                         "STATE page={}/{} zoom={:.3} mode={:?} dark={} dirty={} strokes={} offset=({:.1},{:.1}) msg={:?}",
                         v.current_page() + 1,
@@ -416,6 +424,7 @@ impl ApplicationHandler<UserEvent> for App {
     }
 
     fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: UserEvent) {
+        log::debug!("user event (window: {})", self.window.is_some());
         match event {
             UserEvent::Wake => self.viewer.dirty = true,
             UserEvent::Platform(ev) => self.handle_platform(ev),

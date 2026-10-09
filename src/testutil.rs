@@ -116,12 +116,12 @@ pub fn make_pdf(pages: &[PageSpec], extras: &Extras) -> Vec<u8> {
             )
             .into_bytes(),
         ));
-        for i in 0..n {
+        for (i, pg) in pages.iter().enumerate() {
             let mut d = format!(
                 "<< /Title (Chapter {}) /Parent {root} 0 R /Dest [{} 0 R /XYZ 0 {} null]",
                 i + 1,
                 page_obj(i),
-                pages[i].h - 100.0
+                pg.h - 100.0
             );
             if i > 0 {
                 d.push_str(&format!(" /Prev {} 0 R", root + i));

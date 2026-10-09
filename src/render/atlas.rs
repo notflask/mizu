@@ -31,7 +31,7 @@ impl SlotArrays {
     pub fn new(slot_px: u32, budget_mb: u32, device: &wgpu::Device, label: &'static str) -> Self {
         let bytes = (slot_px * slot_px * 4) as usize;
         let max_slots = ((budget_mb as usize) << 20) / bytes;
-        let max_layers = device.limits().max_texture_array_layers.min(64).max(1);
+        let max_layers = device.limits().max_texture_array_layers.clamp(1, 64);
         SlotArrays {
             slot_px,
             max_slots: max_slots.max(4),

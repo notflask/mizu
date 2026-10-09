@@ -277,9 +277,9 @@ impl Viewer {
             }
             (Button::Right, false) => {
                 self.mouse.right = false;
-                if self.pen.is_active() && self.pen.is_erasing() && !self.mouse.left {
-                    self.pen_up();
-                } else if self.pen.is_active() && self.pen.is_erasing() && self.tool != Tool::Eraser
+                if self.pen.is_active()
+                    && self.pen.is_erasing()
+                    && (!self.mouse.left || self.tool != Tool::Eraser)
                 {
                     self.pen_up();
                 }

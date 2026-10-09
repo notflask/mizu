@@ -57,6 +57,8 @@ struct Globals {
     _pad: u32,
     fg: [f32; 4],
     bg: [f32; 4],
+    fg_lin: [f32; 4],
+    bg_lin: [f32; 4],
 }
 
 #[repr(C)]
@@ -169,6 +171,8 @@ pub struct FrameStats {
     pub tiles_cached: u32,
     pub tile_slots: u32,
 }
+
+type KindMaker = fn(u16) -> BatchKind;
 
 #[derive(Clone, Copy)]
 enum BatchKind {
@@ -795,7 +799,7 @@ impl Renderer {
             });
             self.images.extend_from_slice(&solids);
         }
-        let kinds: [(usize, fn(u16) -> BatchKind); 3] = [
+        let kinds: [(usize, KindMaker); 3] = [
             (0, BatchKind::Thumb),
             (1, BatchKind::Tile),
             (2, BatchKind::Tile),
@@ -848,6 +852,18 @@ impl Renderer {
             _pad: 0,
             fg: [dark_theme.fg[0], dark_theme.fg[1], dark_theme.fg[2], 0.0],
             bg: [dark_theme.bg[0], dark_theme.bg[1], dark_theme.bg[2], 0.0],
+            fg_lin: [
+                dark_theme.fg_lin[0],
+                dark_theme.fg_lin[1],
+                dark_theme.fg_lin[2],
+                0.0,
+            ],
+            bg_lin: [
+                dark_theme.bg_lin[0],
+                dark_theme.bg_lin[1],
+                dark_theme.bg_lin[2],
+                0.0,
+            ],
         };
         self.gpu
             .queue

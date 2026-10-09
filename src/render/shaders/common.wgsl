@@ -8,6 +8,9 @@ struct Globals {
     // OKLab of the dark-mode foreground / background (xyz, w unused).
     fg: vec4<f32>,
     bg: vec4<f32>,
+    // The same colours in linear sRGB.
+    fg_lin: vec4<f32>,
+    bg_lin: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> g: Globals;
@@ -63,10 +66,19 @@ fn recolor(c: vec3<f32>) -> vec3<f32> {
         return c;
     }
     let lab = to_oklab(c);
+    let y = clamp(dot(c, vec3<f32>(0.2126, 0.7152, 0.0722)), 0.0, 1.0);
+    // Neutral path: mix in linear light (exact anti-aliasing for text).
+    let base_lin = mix(g.fg_lin.xyz, g.bg_lin.xyz, y);
+    let base = to_oklab(base_lin);
+    // Coloured path: invert OKLab lightness, keep hue and chroma.
     let t = clamp(lab.x, 0.0, 1.0);
-    let l = mix(g.fg.x, g.bg.x, t);
-    let tint = mix(g.fg.yz, g.bg.yz, t);
-    let full = from_oklab(vec3<f32>(l, tint + lab.yz));
+    // Inverted lightness with lifted mid-tones (COLOR_LIFT = 0.55 in recolor.rs).
+    let l_inv = mix(g.fg.x, g.bg.x, 1.0 - pow(1.0 - t, 0.55));
+    let chroma = length(lab.yz);
+    let w = smoothstep(0.02, 0.10, chroma);
+    let l = mix(base.x, l_inv, w);
+
+    let full = from_oklab(vec3<f32>(l, base.yz + lab.yz));
     if (in_gamut(full)) {
         return clamp(full, vec3<f32>(0.0), vec3<f32>(1.0));
     }
@@ -74,12 +86,12 @@ fn recolor(c: vec3<f32>) -> vec3<f32> {
     var hi = 1.0;
     for (var i = 0; i < 8; i++) {
         let mid = 0.5 * (lo + hi);
-        let cand = from_oklab(vec3<f32>(l, tint + lab.yz * mid));
+        let cand = from_oklab(vec3<f32>(l, base.yz + lab.yz * mid));
         if (in_gamut(cand)) {
             lo = mid;
         } else {
             hi = mid;
         }
     }
-    return clamp(from_oklab(vec3<f32>(l, tint + lab.yz * lo)), vec3<f32>(0.0), vec3<f32>(1.0));
+    return clamp(from_oklab(vec3<f32>(l, base.yz + lab.yz * lo)), vec3<f32>(0.0), vec3<f32>(1.0));
 }

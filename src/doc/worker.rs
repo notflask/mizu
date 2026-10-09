@@ -261,9 +261,9 @@ impl WorkerCtx {
                 Job::Thumb(p) => *p,
             };
             let result = (|| -> Result<Rendered, String> {
-                if !cache.contains_key(&page) {
+                if let std::collections::hash_map::Entry::Vacant(slot) = cache.entry(page) {
                     let cp = build_page(&doc, page as usize)?;
-                    cache.insert(page, cp);
+                    slot.insert(cp);
                     lru.push_back(page);
                     while lru.len() > DISPLAY_LIST_CACHE {
                         if let Some(old) = lru.pop_front() {

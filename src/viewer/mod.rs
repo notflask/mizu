@@ -339,6 +339,7 @@ impl Viewer {
     fn poll_loader(&mut self) {
         let Some(l) = &self.loader else { return };
         let Ok(result) = l.rx.try_recv() else { return };
+        log::debug!("loader finished: ok={}", result.is_ok());
         let Loader { purpose, path, .. } = self.loader.take().expect("checked above");
         match result {
             Ok(info) => self.apply_loaded(info, purpose),
@@ -714,13 +715,13 @@ impl Viewer {
             let k = 1.0 - (-dt * 22.0).exp();
             let s = self.camera.scale();
             let mut done = true;
-            for i in 0..2 {
-                let diff = target[i] - self.camera.offset[i];
+            for (off, tgt) in self.camera.offset.iter_mut().zip(target) {
+                let diff = tgt - *off;
                 if diff.abs() * s > 0.3 {
-                    self.camera.offset[i] += diff * k;
+                    *off += diff * k;
                     done = false;
                 } else {
-                    self.camera.offset[i] = target[i];
+                    *off = tgt;
                 }
             }
             if done {

@@ -83,8 +83,7 @@ pub fn wanted_tiles(
 
     let first = visible.start.saturating_sub(3);
     let last = (visible.end + 3).min(pages.len());
-    for pi in first..last {
-        let g = &pages[pi];
+    for (pi, g) in pages.iter().enumerate().take(last).skip(first) {
         let origin = page_origin(cam, g);
         let ppx = page_px(g, tile_scale);
         let Some(outer) = tile_range(origin, ratio, ppx, cam.viewport, prefetch) else {
@@ -310,12 +309,9 @@ mod tests {
         assert!(all[..first_prefetch]
             .iter()
             .all(|k| (1..=3).contains(&k.ty)));
-        assert!(
-            all[first_prefetch..]
-                .iter()
-                .any(|k| (1..=3).contains(&k.ty))
-                == false
-        );
+        assert!(!all[first_prefetch..]
+            .iter()
+            .any(|k| (1..=3).contains(&k.ty)));
     }
 
     #[test]
@@ -368,8 +364,10 @@ mod tests {
 
     #[test]
     fn lru_skips_tiles_used_this_frame() {
-        let mut idx = TileIndex::default();
-        idx.frame = 10;
+        let mut idx = TileIndex {
+            frame: 10,
+            ..Default::default()
+        };
         let k1 = TileKey {
             page: 0,
             scale: 1,
