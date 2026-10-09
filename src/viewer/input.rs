@@ -2,7 +2,6 @@
 
 use super::{Tool, UiMode, Viewer};
 use crate::doc::service::LinkTarget;
-use crate::input::command;
 use crate::input::keymap::Mode;
 use crate::input::{Key, KeyCode};
 
@@ -68,83 +67,8 @@ impl Viewer {
         self.fired = fired;
     }
 
-    fn on_key_line(&mut self, key: Key) {
-        let ctrl = key.mods.ctrl;
-        match key.code {
-            KeyCode::Esc => {
-                self.mode = UiMode::Normal;
-                self.line.clear();
-            }
-            KeyCode::Char('[') if ctrl => {
-                self.mode = UiMode::Normal;
-                self.line.clear();
-            }
-            KeyCode::Enter => {
-                let line = std::mem::take(&mut self.line);
-                let mode = self.mode;
-                self.mode = UiMode::Normal;
-                match mode {
-                    UiMode::Command => {
-                        if !line.trim().is_empty() && self.history_cmd.last() != Some(&line) {
-                            self.history_cmd.push(line.clone());
-                        }
-                        self.execute_command(&line);
-                    }
-                    UiMode::Search { forward } => self.start_search(&line, forward),
-                    _ => {}
-                }
-            }
-            KeyCode::Backspace => {
-                if self.line.pop().is_none() {
-                    self.mode = UiMode::Normal;
-                }
-            }
-            KeyCode::Char('u') if ctrl => self.line.clear(),
-            KeyCode::Char('w') if ctrl => {
-                let trimmed = self.line.trim_end().len();
-                let cut = self.line[..trimmed]
-                    .rfind([' ', '/'])
-                    .map(|i| i + 1)
-                    .unwrap_or(0);
-                self.line.truncate(cut);
-            }
-            KeyCode::Tab if self.mode == UiMode::Command => {
-                if let Some(done) = command::complete(&self.line) {
-                    self.line = done;
-                }
-            }
-            KeyCode::Up if self.mode == UiMode::Command => self.history_step(true),
-            KeyCode::Down if self.mode == UiMode::Command => self.history_step(false),
-            _ => {
-                if let Some(c) = key.text() {
-                    self.line.push(c);
-                }
-            }
-        }
-    }
-
-    fn history_step(&mut self, older: bool) {
-        if self.history_cmd.is_empty() {
-            return;
-        }
-        let n = self.history_cmd.len();
-        let idx = match (self.history_idx, older) {
-            (None, true) => n - 1,
-            (Some(i), true) => i.saturating_sub(1),
-            (Some(i), false) if i + 1 < n => i + 1,
-            (Some(_), false) => {
-                self.history_idx = None;
-                self.line.clear();
-                return;
-            }
-            (None, false) => return,
-        };
-        self.history_idx = Some(idx);
-        self.line = self.history_cmd[idx].clone();
-    }
-
     fn on_key_outline(&mut self, key: Key) {
-        let len = self.outline_visible().len();
+        let len = self.list_visible().len();
         let ctrl = key.mods.ctrl;
         let navigating = !self.outline_filtering && self.outline_filter.is_empty();
         let mut sel = self.outline_sel as isize;
@@ -160,7 +84,7 @@ impl Viewer {
                 return;
             }
             KeyCode::Enter => {
-                self.outline_jump();
+                self.list_activate();
                 return;
             }
             KeyCode::Up => sel -= 1,

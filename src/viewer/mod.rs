@@ -5,6 +5,7 @@
 mod actions;
 mod draw;
 pub mod input;
+mod line;
 mod search;
 mod status;
 
@@ -123,6 +124,20 @@ pub struct MouseState {
     pub inside: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ListKind {
+    Outline,
+    Help,
+    Recent,
+}
+
+/// A row of the help or recent-files list.
+#[derive(Clone, Debug)]
+pub struct ListEntry {
+    pub text: String,
+    pub file: Option<PathBuf>,
+}
+
 pub struct Viewer {
     pub settings: Settings,
     pub keymaps: Keymaps,
@@ -137,8 +152,16 @@ pub struct Viewer {
     pub message: Option<Msg>,
     /// Text of the `:` / `/` / password line.
     pub line: String,
+    /// Byte offset of the cursor in `line`.
+    pub line_cursor: usize,
+    completion: line::Completion,
     history_cmd: Vec<String>,
     history_idx: Option<usize>,
+    /// What was typed before walking the history.
+    history_prefix: String,
+    /// What the list overlay (`UiMode::Outline`) shows.
+    pub list_kind: ListKind,
+    list_items: Vec<ListEntry>,
     outline_filter: String,
     outline_filtering: bool,
     outline_sel: usize,
@@ -212,8 +235,13 @@ impl Viewer {
             window_size: [800, 600],
             message: None,
             line: String::new(),
+            line_cursor: 0,
+            completion: line::Completion::default(),
             history_cmd: Vec::new(),
             history_idx: None,
+            history_prefix: String::new(),
+            list_kind: ListKind::Outline,
+            list_items: Vec::new(),
             outline_filter: String::new(),
             outline_filtering: false,
             outline_sel: 0,
@@ -304,11 +332,12 @@ impl Viewer {
     pub fn title(&self) -> String {
         match &self.doc {
             Some(d) => format!(
-                "{} — mizu",
+                "{}{} — mizu",
                 d.path
                     .file_name()
                     .map(|n| n.to_string_lossy().into_owned())
-                    .unwrap_or_default()
+                    .unwrap_or_default(),
+                if self.is_dirty() { " [+]" } else { "" }
             ),
             None => "mizu".to_string(),
         }
@@ -536,7 +565,25 @@ impl Viewer {
     }
 
     /// Persist the session (call when quitting or switching files).
+    /// Restore the pen settings of the last run (the app calls this; tests
+    /// start from the config defaults).
+    pub fn restore_prefs(&mut self) {
+        if let Some(p) = self.session.pen {
+            self.pen_color = p.color;
+            self.pen_width = p.width.clamp(0.25, 20.0);
+        }
+    }
+
+    /// Put the pen settings into the (in-memory) session.
+    pub fn remember_prefs(&mut self) {
+        self.session.pen = Some(crate::session::PenPrefs {
+            color: self.pen_color,
+            width: self.pen_width,
+        });
+    }
+
     pub fn save_session(&mut self) {
+        self.remember_prefs();
         if let Some(d) = self.doc.take() {
             self.remember_view_of(&d);
             self.doc = Some(d);

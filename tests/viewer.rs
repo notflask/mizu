@@ -674,3 +674,96 @@ fn non_latin_layout_uses_the_latin_key() {
     v.on_key_layout(Key::ch('ш'), Some(Key::ch('i')));
     assert_eq!(v.line, "ш");
 }
+
+#[test]
+fn command_line_tab_completion_and_editing() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut v = open(&sample(dir.path(), 2));
+    // A unique command completes, with a space when it takes an argument.
+    keys(&mut v, ":wid<Tab>");
+    assert_eq!(v.line, "width ");
+    keys(&mut v, "<Esc>:da<Tab>");
+    assert_eq!(v.line, "dark");
+    // No common prefix to add: Tab cycles, Shift-Tab goes back.
+    keys(&mut v, "<Esc>:co<Tab>");
+    assert_eq!(v.line, "color ");
+    keys(&mut v, "<Tab>");
+    assert_eq!(v.line, "color 1");
+    keys(&mut v, "<Tab>");
+    assert_eq!(v.line, "color 2");
+    keys(&mut v, "<S-Tab>");
+    assert_eq!(v.line, "color 1");
+    keys(&mut v, "<CR>");
+    assert_eq!(v.pen_color, v.settings.palette[0]);
+
+    // Cursor editing in the middle of the line.
+    keys(&mut v, ":wdth<Left><Left><Left>i");
+    assert_eq!(v.line, "width");
+    keys(&mut v, "<Home><Del>W<End>X<BS>");
+    assert_eq!(v.line, "Width");
+    keys(&mut v, "<C-u>");
+    assert_eq!(v.line, "");
+
+    // Ghost text from history, accepted with Right.
+    keys(&mut v, "<Esc>:width 3<CR>");
+    assert!((v.pen_width - 3.0).abs() < 1e-6);
+    keys(&mut v, ":wi<Right>");
+    assert_eq!(v.line, "width 3");
+    // History walks only entries with the typed prefix.
+    keys(&mut v, "<Esc>:dark<CR>:light<CR>:w<Up>");
+    assert_eq!(v.line, "width 3");
+    keys(&mut v, "<Down>");
+    assert_eq!(v.line, "w");
+}
+
+#[test]
+fn file_completion_in_the_command_line() {
+    let dir = tempfile::tempdir().unwrap();
+    let doc = sample(dir.path(), 1);
+    std::fs::create_dir(dir.path().join("lectures")).unwrap();
+    std::fs::write(dir.path().join("lectures/linalg.pdf"), b"").unwrap();
+    let mut v = open(&doc);
+    let base = dir.path().display().to_string();
+    keys(&mut v, ":e ");
+    for c in base.chars() {
+        v.on_key(mizu::input::Key::ch(c));
+    }
+    keys(&mut v, "/lec<Tab>");
+    assert_eq!(v.line, format!("e {base}/lectures/"));
+    keys(&mut v, "<Tab>");
+    assert_eq!(v.line, format!("e {base}/lectures/linalg.pdf"));
+}
+
+#[test]
+fn help_and_recent_lists() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut v = open(&sample(dir.path(), 2));
+    keys(&mut v, ":help<CR>");
+    assert_eq!(v.mode, UiMode::Outline);
+    let rows = v.list_visible();
+    assert!(rows.iter().any(|(_, t)| t.contains("toggle_dark")));
+    assert!(rows.iter().any(|(_, t)| t.contains(":write")));
+    keys(&mut v, "<Esc>");
+    assert_eq!(v.mode, UiMode::Normal);
+    let path = v.path().unwrap().to_path_buf();
+    v.session.set(&path, Default::default());
+    keys(&mut v, ":recent<CR>");
+    assert_eq!(v.mode, UiMode::Outline);
+    assert!(v.list_visible()[0].1.contains("doc.pdf"));
+}
+
+#[test]
+fn pen_settings_go_into_the_session() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut v = open(&sample(dir.path(), 1));
+    keys(&mut v, ":color #123456<CR>:width 4<CR>");
+    // Not save_session: tests share one session file.
+    v.remember_prefs();
+    let p = v.session.pen.expect("pen prefs");
+    assert_eq!(p.color, [0x12, 0x34, 0x56]);
+    assert!((p.width - 4.0).abs() < 1e-6);
+    let mut w = Viewer::new(Settings::default(), None, Arc::new(|| {}));
+    w.session.pen = Some(p);
+    w.restore_prefs();
+    assert_eq!(w.pen_color, [0x12, 0x34, 0x56]);
+}

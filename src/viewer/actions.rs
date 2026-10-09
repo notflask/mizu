@@ -3,10 +3,10 @@
 use std::path::PathBuf;
 use std::time::Instant;
 
-use super::{LoadPurpose, Pos, Saving, Tool, UiMode, Viewer, MAX_JUMPS};
+use super::{ListEntry, ListKind, LoadPurpose, Pos, Saving, Tool, UiMode, Viewer, MAX_JUMPS};
 use crate::doc::service::Job;
 use crate::input::command::{self, Command};
-use crate::input::Action;
+use crate::input::{Action, Mode};
 use crate::view::ZoomMode;
 
 const E37: &str = "E37: No write since last change (add ! to override)";
@@ -113,6 +113,7 @@ impl Viewer {
             JumpBack => self.jump_back(),
             JumpForward => self.jump_forward(),
             Outline => self.open_outline(),
+            Help => self.open_help(),
             ToggleDark => {
                 let on = !self.dark;
                 self.set_dark(on);
@@ -149,19 +150,18 @@ impl Viewer {
                 } else {
                     Tool::Eraser
                 };
+                self.info(if self.tool == Tool::Eraser {
+                    "eraser"
+                } else {
+                    "pen"
+                });
                 self.dirty = true;
             }
             PenTool => {
                 self.tool = Tool::Pen;
                 self.dirty = true;
             }
-            SelectColor(i) => {
-                if let Some(c) = self.settings.palette.get(i as usize - 1) {
-                    self.pen_color = *c;
-                    self.tool = Tool::Pen;
-                    self.dirty = true;
-                }
-            }
+            SelectColor(i) => self.select_palette(i),
             WidthDown => self.set_pen_width(self.pen_width / 1.25),
             WidthUp => self.set_pen_width(self.pen_width * 1.25),
         }
@@ -170,6 +170,28 @@ impl Viewer {
 
     pub fn set_pen_width(&mut self, w: f32) {
         self.pen_width = w.clamp(0.25, 20.0);
+        self.dirty = true;
+    }
+
+    /// Pick palette entry `i` (1-based).
+    pub fn select_palette(&mut self, i: u8) {
+        match self.settings.palette.get((i as usize).wrapping_sub(1)) {
+            Some(&c) => self.select_color(c, Some(i)),
+            Option::None => self.error(format!(
+                "No colour {i} in the palette (it has {})",
+                self.settings.palette.len()
+            )),
+        }
+    }
+
+    pub fn select_color(&mut self, c: [u8; 3], index: Option<u8>) {
+        self.pen_color = c;
+        self.tool = Tool::Pen;
+        let hex = command::format_hex(c);
+        self.info(match index {
+            Some(i) => format!("colour {i}  {hex}"),
+            Option::None => format!("colour {hex}"),
+        });
         self.dirty = true;
     }
 
@@ -348,10 +370,7 @@ impl Viewer {
             .iter()
             .rposition(|o| o.page.map(|p| p <= cur).unwrap_or(false))
             .unwrap_or(0);
-        self.outline_filter.clear();
-        self.outline_filtering = false;
-        self.outline_sel = 0;
-        self.mode = UiMode::Outline;
+        self.open_list(ListKind::Outline, Vec::new());
         // Select the entry for the current position within the unfiltered list.
         self.outline_sel = sel;
     }
@@ -367,6 +386,132 @@ impl Viewer {
             .enumerate()
             .filter(|(_, o)| f.is_empty() || o.title.to_lowercase().contains(&f))
             .collect()
+    }
+
+    fn open_list(&mut self, kind: ListKind, items: Vec<ListEntry>) {
+        self.list_kind = kind;
+        self.list_items = items;
+        self.outline_filter.clear();
+        self.outline_filtering = false;
+        self.outline_sel = 0;
+        self.mode = UiMode::Outline;
+    }
+
+    pub fn open_help(&mut self) {
+        let mut items = Vec::new();
+        let section = |title: &str, items: &mut Vec<ListEntry>| {
+            items.push(ListEntry {
+                text: format!("── {title} ──"),
+                file: Option::None,
+            });
+        };
+        for (mode, title) in [
+            (Mode::Normal, "normal mode"),
+            (Mode::Draw, "drawing mode (i)"),
+        ] {
+            section(title, &mut items);
+            for (keys, action) in self.keymaps.bindings(mode) {
+                // Drawing mode inherits normal mode; list only what differs.
+                if mode == Mode::Draw
+                    && self
+                        .keymaps
+                        .bindings(Mode::Normal)
+                        .contains(&(keys.clone(), action))
+                {
+                    continue;
+                }
+                items.push(ListEntry {
+                    text: format!("{keys:<10} {}", action.name()),
+                    file: Option::None,
+                });
+            }
+        }
+        section("commands", &mut items);
+        for c in command::COMMANDS {
+            let mut name = c.name.to_string();
+            for a in c.aliases {
+                name.push_str(", ");
+                name.push_str(a);
+            }
+            items.push(ListEntry {
+                text: format!(":{name} {}  ·  {}", c.arg_hint, c.help),
+                file: Option::None,
+            });
+        }
+        self.open_list(ListKind::Help, items);
+    }
+
+    pub fn open_recent(&mut self) {
+        let items: Vec<ListEntry> = self
+            .session
+            .recent(100)
+            .into_iter()
+            .map(|(path, st)| ListEntry {
+                text: format!("{}  ·  page {}", tilde(&path), st.page + 1),
+                file: Some(path),
+            })
+            .collect();
+        if items.is_empty() {
+            self.info("No recent files");
+            return;
+        }
+        self.open_list(ListKind::Recent, items);
+    }
+
+    /// Rows of the list overlay that match the filter: (index, text).
+    pub fn list_visible(&self) -> Vec<(usize, String)> {
+        match self.list_kind {
+            ListKind::Outline => self
+                .outline_visible()
+                .into_iter()
+                .map(|(i, o)| {
+                    let indent = "  ".repeat(o.level as usize);
+                    let text = match o.page {
+                        Some(p) => format!("{indent}{}  ·  {}", o.title, p + 1),
+                        Option::None => format!("{indent}{}", o.title),
+                    };
+                    (i, text)
+                })
+                .collect(),
+            ListKind::Help | ListKind::Recent => {
+                let f = self.outline_filter.to_lowercase();
+                self.list_items
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, e)| f.is_empty() || e.text.to_lowercase().contains(&f))
+                    .map(|(i, e)| (i, e.text.clone()))
+                    .collect()
+            }
+        }
+    }
+
+    /// Enter in the list overlay.
+    pub fn list_activate(&mut self) {
+        match self.list_kind {
+            ListKind::Outline => self.outline_jump(),
+            ListKind::Help => self.mode = UiMode::Normal,
+            ListKind::Recent => {
+                let vis = self.list_visible();
+                let Some((i, _)) = vis.get(self.outline_sel.min(vis.len().saturating_sub(1)))
+                else {
+                    return;
+                };
+                let file = self.list_items[*i].file.clone();
+                self.mode = UiMode::Normal;
+                if let Some(p) = file {
+                    if self.is_dirty() {
+                        self.error(E37);
+                    } else {
+                        self.open(p, LoadPurpose::Open { page: Option::None });
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn set_font_size(&mut self, pt: f32) {
+        let _ = pt;
+        self.error("E: :fontsize only works in EPUB books");
     }
 
     pub fn outline_jump(&mut self) {
@@ -394,13 +539,6 @@ impl Viewer {
     // ------------------------------------------------------------------
     // commands
     // ------------------------------------------------------------------
-
-    pub fn begin_line(&mut self, mode: UiMode) {
-        self.mode = mode;
-        self.line.clear();
-        self.history_idx = Option::None;
-        self.dirty = true;
-    }
 
     pub fn execute_command(&mut self, line: &str) {
         let cmd = match command::parse(line) {
@@ -451,11 +589,13 @@ impl Viewer {
             }
             Command::Dark => self.set_dark(true),
             Command::Light => self.set_dark(false),
-            Command::Color(c) => {
-                self.pen_color = c;
-                self.tool = Tool::Pen;
-            }
-            Command::Width(w) => self.set_pen_width(w),
+            Command::Color(c) => self.select_color(c, Option::None),
+            Command::ColorIndex(i) => self.select_palette(i),
+            Command::Width(Some(w)) => self.set_pen_width(w),
+            Command::Width(Option::None) => self.info(format!("width {:.2}pt", self.pen_width)),
+            Command::Help => self.open_help(),
+            Command::Recent => self.open_recent(),
+            Command::FontSize(pt) => self.set_font_size(pt),
         }
         self.dirty = true;
     }
@@ -560,4 +700,14 @@ impl Viewer {
             self.start_load_keep(path);
         }
     }
+}
+
+/// A path for display, with the home directory as `~`.
+pub(super) fn tilde(p: &std::path::Path) -> String {
+    if let Some(home) = directories::UserDirs::new().map(|d| d.home_dir().to_path_buf()) {
+        if let Ok(rest) = p.strip_prefix(&home) {
+            return format!("~/{}", rest.display());
+        }
+    }
+    p.display().to_string()
 }

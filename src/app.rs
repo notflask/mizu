@@ -222,6 +222,7 @@ impl App {
             let _ = p.send_event(UserEvent::Wake);
         });
         let mut viewer = Viewer::new(settings, warning, wake);
+        viewer.restore_prefs();
         viewer.show_stats = opts.stats;
         if let Some(f) = opts.file {
             viewer.open(f, LoadPurpose::Open { page: opts.page });
@@ -450,7 +451,10 @@ impl ApplicationHandler<UserEvent> for App {
         }
         let mut attrs = Window::default_attributes()
             .with_title(self.viewer.title())
-            .with_inner_size(LogicalSize::new(1100.0, 820.0))
+            .with_inner_size(match self.viewer.session.window {
+                Some([w, h]) if w >= 320.0 && h >= 240.0 => LogicalSize::new(w as f64, h as f64),
+                _ => LogicalSize::new(1100.0, 820.0),
+            })
             .with_min_inner_size(LogicalSize::new(320.0, 240.0));
         #[cfg(all(unix, not(target_os = "macos")))]
         {
@@ -685,6 +689,12 @@ impl ApplicationHandler<UserEvent> for App {
     }
 
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        if let Some(w) = &self.window {
+            let size = w.inner_size().to_logical::<f32>(w.scale_factor());
+            if w.fullscreen().is_none() && !w.is_maximized() {
+                self.viewer.session.window = Some([size.width, size.height]);
+            }
+        }
         self.viewer.save_session();
     }
 }

@@ -118,6 +118,7 @@ Counts work like in Vim: `5j`, `12G`.
 | `u` `Ctrl-r` | undo / redo |
 | `r` | reload the file |
 | `:` | command line |
+| `F1`, `:help` | every key and command |
 | `ZZ` `ZQ` | save and quit / quit without saving |
 
 In drawing mode:
@@ -127,7 +128,7 @@ In drawing mode:
 | left drag | draw (or erase, when the eraser is active) |
 | right drag | erase while held |
 | middle drag | pan |
-| `1`–`9` | pick a colour from the palette |
+| `1`–`9` | pick a colour from the palette (shown in the status line) |
 | `[` `]` | thinner / thicker |
 | `e` | switch between pen and eraser |
 
@@ -144,9 +145,24 @@ the platform reports it. A pen with pressure draws variable-width lines (see *St
 | `:e file.pdf`, `:e!` | open a file, reload and drop unsaved ink |
 | `:42` | go to page 42 |
 | `:dark`, `:light` | switch the page colours |
-| `:color #rrggbb`, `:width 2` | pen colour and width (points) |
+| `:color #rrggbb`, `:color red`, `:color 3` | pen colour: hex, a name, or a palette entry |
+| `:width 2`, `:width` | set the pen width (points), or show it |
+| `:recent` | recently opened files |
+| `:help` | every key and command |
 
 Saving is explicit, like in Vim: nothing is written until you say `:w`.
+
+The command line suggests as you type: matching commands (with what they take), files for `:e`
+and `:w`, colours for `:color`. The best match appears in grey after the cursor; `→` or `Ctrl-e`
+takes it. `Tab` completes as far as all suggestions agree, and pressing it again walks through
+them (`Shift-Tab` backwards). The line can be edited like a shell: `←` `→`, `Home` `End`,
+`Ctrl-a` `Ctrl-e`, `Ctrl-w`, `Ctrl-u`, `Ctrl-k`. `↑` `↓` walk the history, limited to entries
+that start with what you typed.
+
+Keys work with any keyboard layout: characters typed with Option (macOS) or AltGr (`[`, `]`, `{`
+on a German keyboard) match their bindings, and with a non-Latin layout (Cyrillic, Greek, …) the
+letters of a US keyboard are used for commands. Pen colour and width are remembered between runs,
+and so is the window size.
 
 ### Configuration
 

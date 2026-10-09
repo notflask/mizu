@@ -95,6 +95,7 @@ impl Keymaps {
             ("<C-i>", JumpForward),
             ("<Tab>", JumpForward),
             ("o", Outline),
+            ("<F1>", Help),
             ("D", ToggleDark),
             ("i", EnterDraw),
             ("u", Undo),
@@ -162,6 +163,19 @@ impl Keymaps {
             }
         }
         warnings
+    }
+
+    /// All bindings of a mode as `(keys, action)`, sorted by action.
+    pub fn bindings(&self, mode: Mode) -> Vec<(String, Action)> {
+        let mut v: Vec<(String, Action)> = self
+            .table(mode)
+            .bindings
+            .iter()
+            .filter(|(_, a)| **a != Action::None)
+            .map(|(k, a)| (crate::input::keys::format_seq(k), *a))
+            .collect();
+        v.sort_by(|a, b| a.1.name().cmp(&b.1.name()).then_with(|| a.0.cmp(&b.0)));
+        v
     }
 
     /// True when `key` appears anywhere in a binding of `mode`.

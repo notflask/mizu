@@ -28,6 +28,18 @@ pub struct FileState {
 pub struct Session {
     files: BTreeMap<String, FileState>,
     counter: u64,
+    /// Pen settings, remembered across files and runs.
+    #[serde(default)]
+    pub pen: Option<PenPrefs>,
+    /// Inner window size in logical pixels.
+    #[serde(default)]
+    pub window: Option<[f32; 2]>,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
+pub struct PenPrefs {
+    pub color: [u8; 3],
+    pub width: f32,
 }
 
 fn key_for(path: &Path) -> String {
@@ -69,6 +81,17 @@ impl Session {
                 self.files.remove(&k);
             }
         }
+    }
+
+    /// Files that still exist, most recently used first.
+    pub fn recent(&self, limit: usize) -> Vec<(PathBuf, &FileState)> {
+        let mut v: Vec<(&String, &FileState)> = self.files.iter().collect();
+        v.sort_by_key(|e| std::cmp::Reverse(e.1.stamp));
+        v.into_iter()
+            .map(|(k, st)| (PathBuf::from(k), st))
+            .filter(|(p, _)| p.is_file())
+            .take(limit)
+            .collect()
     }
 
     pub fn len(&self) -> usize {
@@ -169,5 +192,34 @@ mod tests {
         let loaded: Option<Session> =
             serde_json::from_str(&std::fs::read_to_string(&p).unwrap()).ok();
         assert!(loaded.is_none());
+    }
+
+    #[test]
+    fn old_files_without_prefs_still_load() {
+        let s: Session = serde_json::from_str(r#"{"files":{},"counter":3}"#).unwrap();
+        assert_eq!(s.pen, None);
+        assert_eq!(s.window, None);
+    }
+
+    #[test]
+    fn recent_lists_existing_files_newest_first() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = dir.path().join("a.pdf");
+        let b = dir.path().join("b.pdf");
+        let gone = dir.path().join("gone.pdf");
+        for f in [&a, &b, &gone] {
+            std::fs::write(f, b"x").unwrap();
+        }
+        let mut s = Session::default();
+        s.set(&a, st(1));
+        s.set(&gone, st(2));
+        s.set(&b, st(3));
+        std::fs::remove_file(&gone).unwrap();
+        let r = s.recent(10);
+        let names: Vec<_> = r
+            .iter()
+            .map(|(p, _)| p.file_name().unwrap().to_owned())
+            .collect();
+        assert_eq!(names, vec!["b.pdf", "a.pdf"]);
     }
 }

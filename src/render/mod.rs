@@ -1031,16 +1031,26 @@ impl Renderer {
                     [0.0, 0.0, 0.0, 0.9]
                 }
             } else {
-                let l = recolor::to_linear3(c.color);
+                // The colour the ink will have on screen.
+                let shown = if theme.dark {
+                    recolor::recolor_srgb8(c.color, &dark_theme)
+                } else {
+                    c.color
+                };
+                let l = recolor::to_linear3(shown);
                 [l[0], l[1], l[2], 0.9]
             };
-            self.rects_page.push(OverlayInst::ring(
-                c.pos[0],
-                c.pos[1],
-                c.radius.max(2.0),
-                1.5 * dpr,
-                col,
-            ));
+            // A thin contrasting halo keeps the ring visible on any page.
+            let halo = if theme.dark {
+                [0.0, 0.0, 0.0, 0.7]
+            } else {
+                [1.0, 1.0, 1.0, 0.8]
+            };
+            let r = c.radius.max(2.0);
+            self.rects_page
+                .push(OverlayInst::ring(c.pos[0], c.pos[1], r, 2.5 * dpr, halo));
+            self.rects_page
+                .push(OverlayInst::ring(c.pos[0], c.pos[1], r, 1.5 * dpr, col));
         }
         let ui_state = input.ui;
         self.ui.update(

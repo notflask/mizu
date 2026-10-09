@@ -36,6 +36,7 @@ pub enum Action {
     JumpForward,
     // misc
     Outline,
+    Help,
     ToggleDark,
     EnterDraw,
     ExitDraw,
@@ -99,6 +100,7 @@ impl Action {
             "jump_back" => JumpBack,
             "jump_forward" => JumpForward,
             "outline" => Outline,
+            "help" => Help,
             "toggle_dark" => ToggleDark,
             "enter_draw" => EnterDraw,
             "exit_draw" => ExitDraw,
@@ -123,6 +125,30 @@ impl Action {
                 }
             }
         })
+    }
+
+    /// The config name of this action (`scroll_down`, `select_color_3`).
+    pub fn name(&self) -> String {
+        if let Action::SelectColor(n) = self {
+            return format!("select_color_{n}");
+        }
+        let dbg = format!("{self:?}");
+        let base = dbg.split('(').next().unwrap_or(&dbg);
+        let mut out = String::new();
+        for (i, c) in base.chars().enumerate() {
+            if c.is_ascii_uppercase() {
+                if i > 0 {
+                    out.push('_');
+                }
+                out.push(c.to_ascii_lowercase());
+            } else {
+                out.push(c);
+            }
+        }
+        match out.as_str() {
+            "zoom100" => "zoom_100".into(),
+            _ => out,
+        }
     }
 
     /// Every action name, for the README table.
@@ -154,6 +180,7 @@ impl Action {
         "jump_back",
         "jump_forward",
         "outline",
+        "help",
         "toggle_dark",
         "enter_draw",
         "exit_draw",
@@ -175,6 +202,16 @@ impl Action {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn name_matches_from_name() {
+        for n in Action::NAMES {
+            if let Some(a) = Action::from_name(n) {
+                assert_eq!(a.name(), *n);
+            }
+        }
+        assert_eq!(Action::SelectColor(4).name(), "select_color_4");
+    }
 
     #[test]
     fn names_roundtrip() {
