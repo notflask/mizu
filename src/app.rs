@@ -227,31 +227,39 @@ impl App {
     }
 
     fn handle_platform(&mut self, ev: PlatformEvent) {
+        // Backends report logical pixels; the viewer works in physical ones.
+        let scale = self
+            .window
+            .as_ref()
+            .map(|w| w.scale_factor() as f32)
+            .unwrap_or(1.0);
+        let phys = |p: [f32; 2]| [p[0] * scale, p[1] * scale];
         match ev {
-            PlatformEvent::PinchBegin { pos } => self.pinch_pos = Some(pos),
+            PlatformEvent::PinchBegin { pos } => self.pinch_pos = Some(phys(pos)),
             PlatformEvent::PinchUpdate { delta, pos } => {
+                let pos = phys(pos);
                 self.pinch_pos = Some(pos);
                 self.viewer.on_pinch(delta, Some(pos));
             }
             PlatformEvent::PinchEnd => self.pinch_pos = None,
+            PlatformEvent::PenHover { pos } => self.viewer.on_cursor_moved(phys(pos)),
             PlatformEvent::PenDown {
                 pos,
                 pressure,
                 eraser,
             } => {
+                let pos = phys(pos);
                 self.viewer.mouse.pos = pos;
                 self.viewer.mouse.inside = true;
                 if self.viewer.mode == UiMode::Draw {
-                    self.viewer.pen_down(
-                        pos,
-                        Some(pressure),
-                        eraser || self.viewer.tool == crate::viewer::Tool::Eraser,
-                    );
+                    let erase = eraser || self.viewer.tool == crate::viewer::Tool::Eraser;
+                    self.viewer.pen_down(pos, Some(pressure), erase);
                 } else {
                     self.viewer.on_mouse_button(Button::Left, true);
                 }
             }
             PlatformEvent::PenMove { pos, pressure } => {
+                let pos = phys(pos);
                 if self.viewer.pen.is_active() {
                     self.viewer.mouse.pos = pos;
                     self.viewer.pen_move(pos, Some(pressure));
