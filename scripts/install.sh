@@ -237,7 +237,10 @@ linux_install_nix() {
 	else
 		say "Installing mizu into your Nix profile"
 	fi
-	run nix profile install "$flake"
+	# `nix profile install` is called `add` since Nix 2.27 or so.
+	local add=install
+	if nix profile add --help >/dev/null 2>&1; then add=add; fi
+	run nix profile "$add" "$flake"
 	say "Done. mizu, its desktop entry and icons are in ~/.nix-profile."
 	note "For a declarative install (NixOS / home-manager):"
 	note "  inputs.mizu.url = \"github:notflask/mizu\";"

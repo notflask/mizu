@@ -44,7 +44,7 @@ git clone https://github.com/notflask/mizu && cd mizu
 
 It builds mizu from the checkout and installs it for your user:
 
-- **NixOS / Nix**: into your Nix profile (`nix profile install`), with the wrapper that finds the
+- **NixOS / Nix**: into your Nix profile (`nix profile add`), with the wrapper that finds the
   Wayland, Vulkan and xkb libraries, the desktop entry and the icons.
 - **Other Linux distributions**: `~/.local/bin/mizu`, the desktop entry and the icons under
   `~/.local/share`. Missing build dependencies are listed with the install command for your
