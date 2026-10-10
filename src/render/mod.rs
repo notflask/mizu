@@ -715,13 +715,9 @@ impl Renderer {
             let g = &layout.pages[pi];
             let origin = tiles::page_origin(cam, g);
             let ppx = tiles::page_px(g, ts);
+            let size = [ppx.0 as f32 * ratio, ppx.1 as f32 * ratio];
             solids.push(ImageInst {
-                rect: [
-                    origin[0],
-                    origin[1],
-                    ppx.0 as f32 * ratio,
-                    ppx.1 as f32 * ratio,
-                ],
+                rect: [origin[0], origin[1], size[0], size[1]],
                 uv: [0.0; 4],
                 layer: SOLID,
                 _pad: [0; 3],
@@ -748,7 +744,7 @@ impl Renderer {
                     _pad: [0; 3],
                 };
                 let arr = t.slot.array;
-                self.push_image(0, arr, inst);
+                self.push_image(0, arr, clip(inst, origin, size));
             }
 
             // Tiles at the current scale; remember if any is missing.
@@ -794,7 +790,7 @@ impl Renderer {
                                     let inst =
                                         tile_inst(origin, fratio, tx, ty, e.w, e.h, e.slot.layer);
                                     let arr = e.slot.array;
-                                    self.push_image(1, arr, inst);
+                                    self.push_image(1, arr, clip(inst, origin, size));
                                 }
                             }
                         }
@@ -1351,6 +1347,22 @@ fn segment_instances(
     }
 }
 
+/// Cut `inst` off where the page ends. Previews and tiles of another scale
+/// round the page up to whole pixels of *their* scale, so they can reach a few
+/// screen pixels past the page and show their padding as a line along it.
+fn clip(mut inst: ImageInst, origin: [f32; 2], size: [f32; 2]) -> ImageInst {
+    for k in 0..2 {
+        let end = origin[k] + size[k];
+        let len = inst.rect[k + 2];
+        if inst.rect[k] + len > end && len > 0.0 {
+            let keep = ((end - inst.rect[k]) / len).max(0.0);
+            inst.rect[k + 2] = len * keep;
+            inst.uv[k + 2] = inst.uv[k] + (inst.uv[k + 2] - inst.uv[k]) * keep;
+        }
+    }
+    inst
+}
+
 fn tile_inst(
     origin: [f32; 2],
     ratio: f32,
@@ -1371,5 +1383,27 @@ fn tile_inst(
         uv: [0.0, 0.0, w as f32 / t, h as f32 / t],
         layer: layer as u32,
         _pad: [0; 3],
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clip_cuts_rect_and_uv_at_the_page_end() {
+        let inst = ImageInst {
+            rect: [10.0, 20.0, 100.0, 50.0],
+            uv: [0.0, 0.0, 0.5, 1.0],
+            layer: 0,
+            _pad: [0; 3],
+        };
+        // The page ends 80 px right of x = 10; the bottom is not reached.
+        let c = clip(inst, [10.0, 20.0], [80.0, 60.0]);
+        assert_eq!(c.rect, [10.0, 20.0, 80.0, 50.0]);
+        assert_eq!(c.uv, [0.0, 0.0, 0.4, 1.0]);
+        // A quad that starts past the end keeps nothing.
+        let c = clip(inst, [0.0, 0.0], [5.0, 100.0]);
+        assert_eq!(c.rect[2], 0.0);
     }
 }
