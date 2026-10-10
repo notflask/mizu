@@ -1575,6 +1575,7 @@ dependencies = [
  "crossbeam-channel",
  "directories",
  "env_logger",
+ "fontdb",
  "glyphon",
  "lexopt",
  "log",

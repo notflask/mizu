@@ -301,6 +301,7 @@ impl WorkerCtx {
                         )?;
                         let mut data = self.buffer();
                         data.copy_from_slice(pixmap.samples());
+                        extend_edges(&mut data, covered(cp.w * s, k.tx), covered(cp.h * s, k.ty));
                         let vw =
                             (w as i64 - k.tx as i64 * TILE as i64).clamp(0, TILE as i64) as u16;
                         let vh =
@@ -317,6 +318,7 @@ impl WorkerCtx {
                         let (w, h) = render_into(&mut pixmap, cp, s, 0.0, 0.0)?;
                         let mut data = self.buffer();
                         data.copy_from_slice(pixmap.samples());
+                        extend_edges(&mut data, covered(cp.w * s, 0), covered(cp.h * s, 0));
                         Ok(Rendered::Thumb(ThumbPixels {
                             page: *p,
                             w: w.min(THUMB) as u16,
@@ -393,6 +395,36 @@ fn build_image_page(f: &FixedDoc, index: usize) -> Result<CachedPage, String> {
     })
 }
 
+/// How many pixels of tile `t` a page `len` pixels long covers completely.
+fn covered(len: f32, t: u16) -> usize {
+    (len - t as f32 * TILE as f32)
+        .floor()
+        .clamp(0.0, TILE as f32) as usize
+}
+
+/// Repeat the last completely covered column and row of a tile over the rest
+/// of it. A page whose size in pixels is fractional ends in a partly covered
+/// pixel that shows the white clear colour (a light line along dark pages),
+/// and linear filtering samples the padding past the edge.
+fn extend_edges(data: &mut [u8], w: usize, h: usize) {
+    let t = TILE as usize;
+    let stride = t * 4;
+    if (1..t).contains(&w) {
+        for row in data.chunks_exact_mut(stride).take(h) {
+            let (inside, rest) = row.split_at_mut(w * 4);
+            let last: [u8; 4] = inside[inside.len() - 4..].try_into().unwrap();
+            rest.as_chunks_mut::<4>().0.fill(last);
+        }
+    }
+    if (1..t).contains(&h) {
+        let (inside, rest) = data.split_at_mut(h * stride);
+        let last = &inside[inside.len() - stride..];
+        for row in rest.chunks_exact_mut(stride) {
+            row.copy_from_slice(last);
+        }
+    }
+}
+
 /// Render the page at scale `s` into `pixmap` (white background), shifted by
 /// `(dx, dy)` device pixels. Returns the full page size in pixels.
 fn render_into(
@@ -408,4 +440,51 @@ fn render_into(
     let area = Rect::new(0.0, 0.0, TILE as f32, TILE as f32);
     cp.list.run(&dev, &ctm, area).map_err(|e| e.to_string())?;
     Ok(((cp.w * s).ceil() as u32, (cp.h * s).ceil() as u32))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::*;
+
+    #[test]
+    fn dark_page_has_no_light_edge() {
+        // A black page 300.4 x 200.6 points: its last pixel column and row
+        // are partly covered.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("dark.pdf");
+        let content = "0 0 0 rg 0 0 300.4 200.6 re f";
+        let pdf = format!(
+            "%PDF-1.4\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n\
+             2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n\
+             3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 300.4 200.6] \
+             /Contents 4 0 R >> endobj\n\
+             4 0 obj << /Length {} >> stream\n{content}\nendstream endobj\n\
+             trailer << /Root 1 0 R >>\n%%EOF\n",
+            content.len()
+        );
+        std::fs::write(&path, pdf).unwrap();
+        let pool = Pool::spawn(path, None, Arc::new(|| {}), 1);
+        let key = TileKey {
+            page: 0,
+            scale: 1.0f32.to_bits(),
+            tx: 0,
+            ty: 0,
+        };
+        pool.set_wanted(vec![key], vec![]);
+        let Rendered::Tile(t) = pool.rx.recv_timeout(Duration::from_secs(20)).unwrap() else {
+            panic!("no tile");
+        };
+        assert_eq!((t.w, t.h), (301, 201));
+        let px = |x: usize, y: usize| t.data[(y * TILE as usize + x) * 4];
+        // The edge, and the padding that filtering reads past it.
+        for x in 299..302 {
+            assert_eq!(px(x, 100), 0, "column {x}");
+        }
+        for y in 199..202 {
+            assert_eq!(px(100, y), 0, "row {y}");
+        }
+        assert_eq!(px(400, 400), 0, "corner padding");
+    }
 }

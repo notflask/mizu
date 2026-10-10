@@ -10,6 +10,7 @@ use mupdf::{DestinationKind, Document};
 use crate::ink::Stroke;
 
 pub mod annots;
+pub mod fonts;
 pub mod fxl;
 pub mod service;
 pub mod worker;
@@ -153,17 +154,26 @@ pub fn is_epub(path: &Path) -> bool {
 }
 
 fn open_raw(path: &Path, epub: bool) -> Result<Document, OpenError> {
+    #[cfg(windows)]
+    fonts::install();
     // MuPDF picks the format from the name. A misnamed EPUB is opened
     // from memory with the right type.
-    if epub
+    let misnamed_epub = epub
         && !path
             .extension()
             .map(|e| e.eq_ignore_ascii_case("epub"))
-            .unwrap_or(false)
-    {
+            .unwrap_or(false);
+    // MuPDF keeps the file open, and Windows refuses to replace an open
+    // file, which breaks saving in place and LaTeX-style rename-over
+    // updates. Read the document into memory there instead.
+    if misnamed_epub || cfg!(windows) {
         let bytes = std::fs::read(path).map_err(|e| OpenError::Failed(e.to_string()))?;
-        return Document::from_bytes(&bytes, "application/epub+zip")
-            .map_err(|e| OpenError::Failed(e.to_string()));
+        let magic = match path.file_name().and_then(|n| n.to_str()) {
+            Some(name) if !misnamed_epub => name,
+            _ if epub => "application/epub+zip",
+            _ => "application/pdf",
+        };
+        return Document::from_bytes(&bytes, magic).map_err(|e| OpenError::Failed(e.to_string()));
     }
     // MuPDF takes raw bytes on Unix (any file name works) and UTF-8 on Windows.
     #[cfg(unix)]
