@@ -76,8 +76,17 @@ mod tests {
         w.rx.recv_timeout(Duration::from_secs(5))
             .expect("no event after rename");
         assert!(hits.load(Ordering::SeqCst) >= 1);
+        // FSEvents (macOS) can deliver the rename in more than one debounced
+        // batch, so wait until the watcher has gone quiet before checking
+        // that unrelated files do not trigger.
+        let quiet_by = std::time::Instant::now() + Duration::from_secs(5);
+        while w.rx.recv_timeout(Duration::from_millis(500)).is_ok() {
+            assert!(
+                std::time::Instant::now() < quiet_by,
+                "watcher never went quiet"
+            );
+        }
         // Unrelated files do not trigger.
-        while w.rx.try_recv().is_ok() {}
         std::fs::write(dir.path().join("other.txt"), b"x").unwrap();
         assert!(w.rx.recv_timeout(Duration::from_millis(800)).is_err());
     }
