@@ -276,6 +276,8 @@ pub fn save_with_strokes(
         .ok_or("path is not valid UTF-8")?
         .to_string();
     doc.save(&tmp_path).map_err(|e| e.to_string())?;
+    // MuPDF keeps `src` open; Windows refuses to rename over an open file.
+    drop(doc);
     if let Ok(f) = std::fs::File::open(tmp.path()) {
         let _ = f.sync_all();
     }
