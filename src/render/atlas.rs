@@ -118,11 +118,14 @@ impl SlotArrays {
         self.free.push(slot);
     }
 
-    /// Copy the valid `w x h` corner of a slot-sized RGBA buffer to the GPU.
+    /// Copy the valid `w x h` corner of a slot-sized RGBA buffer to the GPU,
+    /// plus one column and row of the padding past it: linear filtering reads
+    /// that far at the page edge, and the slot may still hold an older image.
     pub fn upload(&self, queue: &wgpu::Queue, slot: Slot, w: u32, h: u32, data: &[u8]) {
         if w == 0 || h == 0 {
             return;
         }
+        let (w, h) = ((w + 1).min(self.slot_px), (h + 1).min(self.slot_px));
         let stride = self.slot_px * 4;
         let needed = ((h - 1) * stride + w * 4) as usize;
         if data.len() < needed {

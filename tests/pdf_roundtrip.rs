@@ -118,6 +118,12 @@ fn pool_renders_tiles_with_content() {
             Rendered::OpenFailed(e) => panic!("open failed: {e}"),
         }
     }
+    // Workers wake the viewer right *after* sending, so the second wake can
+    // come a moment after the second result.
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while wakes.load(Ordering::SeqCst) < 2 && std::time::Instant::now() < until {
+        std::thread::yield_now();
+    }
     assert!(wakes.load(Ordering::SeqCst) >= 2);
 }
 
