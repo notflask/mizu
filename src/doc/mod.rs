@@ -10,6 +10,7 @@ use mupdf::{DestinationKind, Document};
 use crate::ink::Stroke;
 
 pub mod annots;
+pub mod fonts;
 pub mod fxl;
 pub mod service;
 pub mod worker;
@@ -153,6 +154,8 @@ pub fn is_epub(path: &Path) -> bool {
 }
 
 fn open_raw(path: &Path, epub: bool) -> Result<Document, OpenError> {
+    #[cfg(windows)]
+    fonts::install();
     // MuPDF picks the format from the name. A misnamed EPUB is opened
     // from memory with the right type.
     if epub

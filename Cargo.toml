@@ -17,7 +17,8 @@ default = []
 profile = ["profiling/profile-with-tracy"]
 
 [dependencies]
-mupdf = { version = "0.8.0", default-features = false, features = ["system-fonts", "base14-fonts", "epub"] }
+mupdf = { version = "0.8.0", default-features = false, features = ["base14-fonts", "epub"] }
+fontdb = { version = "0.23", default-features = false, features = ["std", "fs", "memmap"] }
 winit = { version = "0.30.13", default-features = false, features = ["rwh_06", "x11", "wayland", "wayland-dlopen", "wayland-csd-adwaita"] }
 wgpu = { version = "30", default-features = false, features = ["wgsl", "vulkan", "gles", "metal", "dx12", "std", "parking_lot"] }
 glyphon = "0.12.0"
@@ -42,6 +43,10 @@ miniz_oxide = "0.8"
 pollster = "1"
 raw-window-handle = "0.6"
 profiling = "1"
+
+# Windows uses mizu's own system font lookup (src/doc/fonts.rs).
+[target.'cfg(not(windows))'.dependencies]
+mupdf = { version = "0.8.0", default-features = false, features = ["system-fonts"] }
 
 [target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
 wayland-client = "0.31"
